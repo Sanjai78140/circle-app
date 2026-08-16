@@ -1,390 +1,545 @@
-const express = require('express');
-const fs = require('fs');
-const path = require('path');
+const app = document.getElementById('app');
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-const DATA_DIR = process.env.DATA_DIR || __dirname;
-const DATA_FILE = path.join(DATA_DIR, 'data.json');
-const CHAT_WINDOW_MS = 2 * 60 * 1000; // 2 minutes
+let myId = localStorage.getItem('circleMemberId') || generateId();
+localStorage.setItem('circleMemberId', myId);
 
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+let quizAnswers = {};
+let quizIndex = 0;
+let dynamicRegionalQuestions = [];
+let screen = 'loading';
+let pollTimer = null;
+let heartbeatTimer = null;
+let titleFlashTimer = null;
+let errMsg = '';
+let draft = { name: '', dob: '', gender: '', userState: 'Tamil Nadu' };
+let notificationSent = false;
 
-// ---------- AI Setup (Gemini / Claude) ----------
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || null;
-const AI_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || null;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-
-async function callClaude(system, userPrompt, maxTokens) {
-  if (!ANTHROPIC_API_KEY) return null;
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01'
-    },
-    body: JSON.stringify({
-      model: AI_MODEL,
-      max_tokens: maxTokens,
-      system,
-      messages: [{ role: 'user', content: userPrompt }]
-    })
-  });
-  if (!res.ok) throw new Error('Anthropic API error ' + res.status);
-  const data = await res.json();
-  const block = (data.content || []).find(b => b.type === 'text');
-  return block ? block.text : null;
+function generateId() {
+  return 'CIRC_' + Math.random().toString(36).substring(2, 7).toUpperCase();
 }
 
-async function callGemini(system, userPrompt, maxTokens, jsonMode) {
-  if (!GEMINI_API_KEY) return null;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-  const body = {
-    system_instruction: { parts: [{ text: system }] },
-    contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-    generationConfig: {
-      maxOutputTokens: maxTokens,
-      ...(jsonMode ? { responseMimeType: 'application/json' } : {})
-    }
-  };
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  if (!res.ok) throw new Error('Gemini API error ' + res.status);
-  const data = await res.json();
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
-}
-
-async function callAI(system, userPrompt, maxTokens, jsonMode) {
-  if (ANTHROPIC_API_KEY) {
-    try { const r = await callClaude(system, userPrompt, maxTokens); if (r) return r; }
-    catch (e) { console.error('callClaude failed:', e.message); }
-  }
-  if (GEMINI_API_KEY) {
-    try { const r = await callGemini(system, userPrompt, maxTokens, jsonMode); if (r) return r; }
-    catch (e) { console.error('callGemini failed:', e.message); }
-  }
-  return null;
-}
-
-// ---------- Astrology Helpers ----------
-const SIGN_ELEMENTS = {
-  Aries: 'Fire', Leo: 'Fire', Sagittarius: 'Fire',
-  Taurus: 'Earth', Virgo: 'Earth', Capricorn: 'Earth',
-  Gemini: 'Air', Libra: 'Air', Aquarius: 'Air',
-  Cancer: 'Water', Scorpio: 'Water', Pisces: 'Water'
-};
-
-function calculateSunSign(dobStr) {
-  if (!dobStr) return 'Aries';
-  const d = new Date(dobStr);
-  if (isNaN(d.getTime())) return 'Aries';
-  const month = d.getMonth() + 1;
-  const day = d.getDate();
-  if ((month == 3 && day >= 21) || (month == 4 && day <= 19)) return 'Aries';
-  if ((month == 4 && day >= 20) || (month == 5 && day <= 20)) return 'Taurus';
-  if ((month == 5 && day >= 21) || (month == 6 && day <= 20)) return 'Gemini';
-  if ((month == 6 && day >= 21) || (month == 7 && day <= 22)) return 'Cancer';
-  if ((month == 7 && day >= 23) || (month == 8 && day <= 22)) return 'Leo';
-  if ((month == 8 && day >= 23) || (month == 9 && day <= 22)) return 'Virgo';
-  if ((month == 9 && day >= 23) || (month == 10 && day <= 22)) return 'Libra';
-  if ((month == 10 && day >= 23) || (month == 11 && day <= 21)) return 'Scorpio';
-  if ((month == 11 && day >= 22) || (month == 12 && day <= 21)) return 'Sagittarius';
-  if ((month == 12 && day >= 22) || (month == 1 && day <= 19)) return 'Capricorn';
-  if ((month == 1 && day >= 20) || (month == 2 && day <= 18)) return 'Aquarius';
-  return 'Pisces';
-}
-
-function computeAstroSynastry(signA, signB) {
-  const elemA = SIGN_ELEMENTS[signA] || 'Fire';
-  const elemB = SIGN_ELEMENTS[signB] || 'Fire';
-  if (elemA === elemB) return { score: 1.0, title: 'Cosmic Soul Elements' };
-  if ((elemA === 'Fire' && elemB === 'Air') || (elemA === 'Air' && elemB === 'Fire')) return { score: 0.95, title: 'Dynamic & Inspiring Spark' };
-  if ((elemA === 'Earth' && elemB === 'Water') || (elemA === 'Water' && elemB === 'Earth')) return { score: 0.95, title: 'Deep & Grounding Harmony' };
-  return { score: 0.75, title: 'Balanced Complementary Energies' };
-}
-
-// ---------- Persistence ----------
-function defaultState() {
-  return { round: 1, members: [], locked: false, pairs: [], chats: {} };
-}
-
-function loadData() {
-  try {
-    if (!fs.existsSync(DATA_FILE)) {
-      const init = defaultState();
-      fs.writeFileSync(DATA_FILE, JSON.stringify(init, null, 2));
-      return init;
-    }
-    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-  } catch (e) {
-    return defaultState();
-  }
-}
-
-function saveData(state) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(state, null, 2));
-}
-
-function chatKey(round, wId, mId) {
-  return `${round}:${wId}:${mId}`;
-}
-
-function checkAutoLoop(state) {
-  if (!state.locked || !state.pairs || state.pairs.length === 0) return state;
-
-  const now = Date.now();
-  let allFinished = true;
-
-  state.pairs.forEach(pair => {
-    const key = chatKey(state.round, pair.womanId, pair.manId);
-    const chat = state.chats[key];
-    if (chat && chat.startedAt) {
-      if (now < chat.startedAt + CHAT_WINDOW_MS) {
-        allFinished = false;
+// ---------- NOTIFICATION SYSTEM ----------
+function requestNotificationPermission() {
+  if ('Notification' in window) {
+    Notification.requestPermission().then(permission => {
+      if (permission === 'granted') {
+        alert('🔔 Notifications enabled! We will ping you the second your partner is ready.');
+        renderLobby();
       }
-    } else {
-      allFinished = false;
-    }
-  });
-
-  if (allFinished && state.pairs.length > 0) {
-    console.log(`All active chats finished for Round ${state.round}. Resetting Circle...`);
-    state = { round: state.round + 1, members: [], locked: false, pairs: [], chats: {} };
-    saveData(state);
-  }
-
-  return state;
-}
-
-// ---------- Multi-Factor Matchmaking Scoring ----------
-function scorePair(w, m) {
-  let sc = 0;
-  const wAns = w.answers || {};
-  const mAns = m.answers || {};
-
-  // 1. Cross Match: Self vs Partner Expectations (35%)
-  if (wAns.myLook === mAns.partnerLook) sc += 8.75;
-  if (mAns.myLook === wAns.partnerLook) sc += 8.75;
-  if (wAns.selfVibe === mAns.partnerVibe) sc += 8.75;
-  if (mAns.selfVibe === wAns.partnerVibe) sc += 8.75;
-
-  // 2. Behavioral & Emotional Alignment (30%)
-  if (wAns.conflictStyle === mAns.conflictStyle) sc += 10;
-  if (wAns.loveLanguage === mAns.loveLanguage) sc += 10;
-  if (wAns.intention === mAns.intention) sc += 10;
-
-  // 3. Cultural & Regional Scenario Alignment (20%)
-  if (w.state && m.state && w.state.toLowerCase() === m.state.toLowerCase()) sc += 10;
-  if (wAns.foodPreference === mAns.foodPreference) sc += 5;
-  if (wAns.cinemaVibe === mAns.cinemaVibe) sc += 5;
-
-  // 4. Zodiac Synastry (15%)
-  const astro = computeAstroSynastry(w.sunSign, m.sunSign);
-  sc += astro.score * 15;
-
-  return Math.min(99, Math.round(sc));
-}
-
-async function aiWhyMatch(w, m, score) {
-  const prompt = `Write a warm, authentic 2-sentence match breakdown for a couple.
-Woman: ${w.name} from ${w.state \vert{}\vert{} 'India'} (Sun Sign:${w.sunSign}).
-Man: ${m.name} from ${m.state \vert{}\vert{} 'India'} (Sun Sign:${m.sunSign}).
-Score: ${score}%.
-Explain why their physical preferences, emotional compatibility, and regional energy make them a high-trust match.`;
-
-  const aiText = await callAI("You are a warm, cultural cosmic matchmaker.", prompt, 150, false);
-  return aiText || `${w.name} (${w.sunSign}) and${m.name} (${m.sunSign}) hit a high${score}% match with strong physical, emotional, and cultural harmony!`;
-}
-
-// ---------- Routes ----------
-app.post('/api/ai-questions', async (req, res) => {
-  const { userState } = req.body;
-  const prompt = `Generate 2 Tanglish/Tamil-vibe real-world scenario questions for someone in "${userState || 'Tamil Nadu'}".
-Focus on food debates (Biriyani vs Parotta), monsoon coffee/bajjis, or long ECR drives.
-Return JSON array format:
-[
-  {
-    "key": "dynamicTanglishScenario",
-    "emoji": "☕",
-    "title": "Local Vibe Check",
-    "question": "Scenario text...",
-    "opts": ["Option A", "Option B", "Option C", "Option D"]
-  }
-]`;
-
-  try {
-    const raw = await callAI("You are a dynamic prompt generator. Return JSON array only.", prompt, 350, true);
-    if (raw) {
-      const parsed = JSON.parse(raw.trim());
-      return res.json({ questions: parsed });
-    }
-  } catch (e) {}
-
-  // Fallback static Tanglish questions
-  res.json({
-    questions: [
-      {
-        key: 'foodPreference',
-        emoji: '🍛',
-        title: 'Foodie Connection',
-        question: 'Namma ooroda classic weekend food debate! What is your absolute non-negotiable favorite?',
-        opts: [
-          'ECR Parotta & Pepper Chicken gravy!',
-          'Authentic Ambur / Dindigul Biriyani.',
-          'Simple Home-cooked Sambar & Potato fry.',
-          'Modern Café food (Burgers & Pasta).'
-        ]
-      }
-    ]
-  });
-});
-
-app.get('/api/state', (req, res) => {
-  let state = checkAutoLoop(loadData());
-  res.json({
-    round: state.round,
-    count: state.members.length,
-    womenCount: state.members.filter(m => m.gender === 'woman').length,
-    menCount: state.members.filter(m => m.gender === 'man').length,
-    locked: state.locked,
-    members: state.members.map(m => ({ id: m.id, name: m.name, gender: m.gender, sunSign: m.sunSign, state: m.state, lastSeen: m.lastSeen })),
-    pairs: state.pairs.map(p => ({ womanId: p.womanId, manId: p.manId, score: p.score, why: p.why, astroTitle: p.astroTitle }))
-  });
-});
-
-app.post('/api/heartbeat', (req, res) => {
-  let state = loadData();
-  const { memberId } = req.body;
-  const mem = state.members.find(m => m.id === memberId);
-  if (mem) {
-    mem.lastSeen = Date.now();
-    saveData(state);
-  }
-  res.json({ success: true });
-});
-
-app.post('/api/join', (req, res) => {
-  let state = checkAutoLoop(loadData());
-  if (state.locked) return res.status(409).json({ error: 'Circle is locked.' });
-
-  const { id, name, dob, gender, userState, answers } = req.body;
-  if (!name || !dob || !gender) return res.status(400).json({ error: 'Missing core details.' });
-
-  const memberId = id || ('mem_' + Math.random().toString(36).slice(2, 9));
-  const sunSign = calculateSunSign(dob);
-
-  const existingIdx = state.members.findIndex(m => m.id === memberId);
-  const memberObj = { id: memberId, name, dob, gender, state: userState || 'Tamil Nadu', sunSign, answers: answers || {}, lastSeen: Date.now() };
-
-  if (existingIdx >= 0) {
-    state.members[existingIdx] = memberObj;
-  } else {
-    state.members.push(memberObj);
-  }
-
-  saveData(state);
-  res.json({ success: true, memberId, sunSign });
-});
-
-app.post('/api/reveal', async (req, res) => {
-  let state = checkAutoLoop(loadData());
-  if (state.locked) return res.json({ success: true, alreadyLocked: true });
-
-  const women = state.members.filter(m => m.gender === 'woman');
-  const men = state.members.filter(m => m.gender === 'man');
-
-  if (women.length === 0 || men.length === 0) {
-    return res.status(400).json({ error: 'Need at least one woman and one man.' });
-  }
-
-  const candidates = [];
-  women.forEach(w => {
-    men.forEach(m => {
-      candidates.push({ woman: w, man: m, score: scorePair(w, m) });
     });
-  });
+  }
+}
 
-  candidates.sort((a, b) => b.score - a.score);
+function notifyUserMatchFound(partnerName, score) {
+  if (notificationSent) return;
+  notificationSent = true;
 
-  const matchedW = new Set();
-  const matchedM = new Set();
-  const pairs = [];
+  // 1. Desktop / System Web Notification
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification('✨ Match Found in The Circle!', {
+      body: `Your potential life partner (${score}% Match) is waiting! Click to enter your 2-min chat.`,
+      icon: 'https://fav.farm/💍',
+      tag: 'circle-match'
+    });
+  }
 
-  for (const c of candidates) {
-    if (!matchedW.has(c.woman.id) && !matchedM.has(c.man.id)) {
-      matchedW.add(c.woman.id);
-      matchedM.add(c.man.id);
-      const astroInfo = computeAstroSynastry(c.woman.sunSign, c.man.sunSign);
-      const why = await aiWhyMatch(c.woman, c.man, c.score);
-      pairs.push({
-        womanId: c.woman.id,
-        manId: c.man.id,
-        score: c.score,
-        astroTitle: astroInfo.title,
-        why
+  // 2. Tab Flashing for Background Users
+  let flash = false;
+  if (titleFlashTimer) clearInterval(titleFlashTimer);
+  titleFlashTimer = setInterval(() => {
+    document.title = flash ? '🔔 MATCH READY! CLICK HERE' : '✨ Life Partner Found!';
+    flash = !flash;
+  }, 1000);
+
+  // Clear title flash on click
+  window.addEventListener('focus', () => {
+    if (titleFlashTimer) clearInterval(titleFlashTimer);
+    document.title = 'The Circle';
+  }, { once: true });
+}
+
+// ---------- 3-SET QUESTION ARCHITECTURE ----------
+const SET_1_QUESTIONS = [
+  {
+    key: 'myLook',
+    emoji: '👤',
+    title: 'SET 1: All About You — Appearance & Style',
+    question: 'How would you best describe your own physical look & skin tone/style?',
+    opts: [
+      'Dusky / Dark skin tone with sharp features & natural charm.',
+      'Fair / Warm tone with a clean, neat & minimalist look.',
+      'Medium / Olive skin tone with an expressive smile & eyes.',
+      'Traditional aesthetic (Veshti/Saree look carries me best).'
+    ]
+  },
+  {
+    key: 'selfVibe',
+    emoji: '⚡',
+    title: 'SET 1: All About You — Natural Energy',
+    question: 'What energy do you naturally bring into a relationship?',
+    opts: [
+      'Calm, loyal, protective & deeply grounded.',
+      'Witty, energetic, talkative & full of humor.',
+      'Soft-spoken, attentive listener & empathetic.',
+      'Bold, passionate, spontaneous & adventurous.'
+    ]
+  }
+];
+
+const SET_2_QUESTIONS = [
+  {
+    key: 'partnerLook',
+    emoji: '👁️',
+    title: 'SET 2: Partner Expectations — Appearance',
+    question: 'What complexion or visual style do you find most attractive in a partner?',
+    opts: [
+      'Dusky / Dark skin guys or girls with sharp, natural charm.',
+      'Fair / Warm tones with a neat & minimalist style.',
+      'Complexion doesn’t matter—smile & posture win me over.',
+      'Traditional look (Saree / Veshti-Kurta look instantly wins!).'
+    ]
+  },
+  {
+    key: 'partnerVibe',
+    emoji: '💖',
+    title: 'SET 2: Partner Expectations — Personality Vibe',
+    question: 'What personality archetype are you looking for?',
+    opts: [
+      'Best-friend vibe: Fun, teasing & easy to talk to.',
+      'Protective & caring: Mature, strong & reliable.',
+      'Calm & gentle: Peaceful, quiet & deeply understanding.',
+      'High energy: Passionate, ambitious & adventurous.'
+    ]
+  }
+];
+
+const SET_3_QUESTIONS = [
+  {
+    key: 'conflictStyle',
+    emoji: '🕊️',
+    title: 'SET 3: How You Act — Conflict Management',
+    question: 'When an argument or misunderstanding happens, how do you handle it?',
+    opts: [
+      'Talk it out immediately with calm honesty—no hiding.',
+      'Take a short quiet pause to cool off, then resolve gently.',
+      'Use light humor or a hug first to ease the tension.',
+      'Write down thoughts to communicate clearly without emotion.'
+    ]
+  },
+  {
+    key: 'loveLanguage',
+    emoji: '💌',
+    title: 'SET 3: How You Act — Love Language',
+    question: 'How do you express deep love & trust in daily life?',
+    opts: [
+      'Quality time & long un-interrupted conversations.',
+      'Acts of service (doing thoughtful small things for them).',
+      'Words of affirmation (reminding them often how special they are).',
+      'Physical touch, warm hugs & hand-holding.'
+    ]
+  },
+  {
+    key: 'intention',
+    emoji: '💍',
+    title: 'SET 3: Deep Goal — Trust & Commitment',
+    question: 'What is your genuine goal with this process?',
+    opts: [
+      'Long-term serious connection leading to marriage.',
+      'Meaningful relationship built on mutual respect & trust.',
+      'Best-friends first to build strong natural chemistry.',
+      'Exploring true compatibility without pressure.'
+    ]
+  }
+];
+
+// ---------- HELPERS & API ----------
+function esc(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function api(path, options = {}) {
+  const res = await fetch('/api' + path, options);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Server error');
+  }
+  return res.json();
+}
+
+function sendHeartbeat() {
+  if (myId) {
+    api('/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memberId: myId })
+    }).catch(() => {});
+  }
+}
+
+// ---------- RENDER VIEWS ----------
+function render() {
+  if (screen === 'loading') renderLoading();
+  else if (screen === 'onboarding') renderOnboarding();
+  else if (screen === 'quiz') renderQuiz();
+  else if (screen === 'lobby') renderLobby();
+  else if (screen === 'chat') renderChat();
+}
+
+function renderLoading() {
+  app.innerHTML = `<div class="card"><div class="sub">Analyzing Compatibility Matrix...</div></div>`;
+}
+
+function renderOnboarding() {
+  app.innerHTML = `
+    <div class="card">
+      <div class="save-id-box">
+        🔑 <strong>Your Resume ID: <span style="color:var(--gold);">${myId}</span></strong>
+        <div style="font-size:11.5px; margin-top:3px; color:var(--muted);">Save this ID to re-login on any device and retrieve your match!</div>
+      </div>
+
+      <div class="honest-banner">
+        ✨ <strong>Trust the Process</strong><br>
+        Answer genuinely across all 3 question sets. Don't worry about waiting—we'll notify you when your match is locked!
+      </div>
+
+      <label class="field-label">Your Name or Nickname</label>
+      <input type="text" id="inName" value="${esc(draft.name)}" placeholder="e.g. Vikram / Priya">
+
+      <label class="field-label">Date of Birth (For Zodiac Synastry)</label>
+      <input type="date" id="inDob" value="${esc(draft.dob)}">
+
+      <label class="field-label">Your State / Region</label>
+      <select id="inState">
+        <option value="Tamil Nadu" ${draft.userState==='Tamil Nadu'?'selected':''}>Tamil Nadu (Tanglish Scenarios)</option>
+        <option value="Karnataka" ${draft.userState==='Karnataka'?'selected':''}>Karnataka</option>
+        <option value="Kerala" ${draft.userState==='Kerala'?'selected':''}>Kerala</option>
+        <option value="Maharashtra" ${draft.userState==='Maharashtra'?'selected':''}>Maharashtra</option>
+        <option value="Delhi / North India" ${draft.userState==='Delhi / North India'?'selected':''}>Delhi / North India</option>
+        <option value="Other / International" ${draft.userState==='Other / International'?'selected':''}>Other / International</option>
+      </select>
+
+      <label class="field-label">I identify as...</label>
+      <div class="gender-row">
+        <div class="gender-opt ${draft.gender === 'woman' ? 'sel' : ''}" onclick="selectGender('woman')">Woman</div>
+        <div class="gender-opt ${draft.gender === 'man' ? 'sel' : ''}" onclick="selectGender('man')">Man</div>
+      </div>
+
+      ${errMsg ? `<div class="err">${esc(errMsg)}</div>` : ''}
+
+      <button class="btn btn-gold" onclick="startFullQuiz()">Begin 3-Stage Compatibility Quiz ✨</button>
+      
+      <div style="margin-top:16px; text-align:center;">
+        <span style="font-size:12px; color:var(--muted); cursor:pointer; text-decoration:underline;" onclick="resumeSession()">Already registered? Check match status</span>
+      </div>
+    </div>
+  `;
+}
+
+function selectGender(g) {
+  draft.gender = g;
+  draft.name = document.getElementById('inName').value;
+  draft.dob = document.getElementById('inDob').value;
+  draft.userState = document.getElementById('inState').value;
+  render();
+}
+
+async function startFullQuiz() {
+  draft.name = document.getElementById('inName').value.trim();
+  draft.dob = document.getElementById('inDob').value;
+  draft.userState = document.getElementById('inState').value;
+
+  if (!draft.name || !draft.dob || !draft.gender) {
+    errMsg = 'Please fill in your name, birthday, and gender.';
+    render();
+    return;
+  }
+
+  errMsg = '';
+  screen = 'loading';
+  render();
+
+  try {
+    const aiRes = await api('/ai-questions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userState: draft.userState })
+    });
+    dynamicRegionalQuestions = aiRes.questions || [];
+  } catch (e) {
+    dynamicRegionalQuestions = [];
+  }
+
+  quizIndex = 0;
+  quizAnswers = {};
+  screen = 'quiz';
+  render();
+}
+
+function getCombinedQuestions() {
+  return [...SET_1_QUESTIONS, ...SET_2_QUESTIONS, ...SET_3_QUESTIONS, ...dynamicRegionalQuestions];
+}
+
+function renderQuiz() {
+  const currentQuestions = getCombinedQuestions();
+  const q = currentQuestions[quizIndex];
+  const totalQ = currentQuestions.length;
+  const progress = Math.round(((quizIndex + 1) / totalQ) * 100);
+
+  app.innerHTML = `
+    <div class="card">
+      <div class="eyebrow">${q.emoji} Step ${quizIndex + 1} of ${totalQ}</div>
+      <div class="squad-bar-track" style="margin-bottom:18px;">
+        <div class="squad-bar-fill" style="width:${progress}%; background:var(--gold);"></div>
+      </div>
+
+      <h2>${esc(q.title)}</h2>
+      <p class="sub">${esc(q.question)}</p>
+
+      <div class="q-options">
+        ${q.opts.map(opt => `
+          <div class="q-opt" onclick="answerQuestion('${q.key}', '${esc(opt)}')">
+            ${esc(opt)}
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+async function answerQuestion(key, val) {
+  quizAnswers[key] = val;
+  quizIndex++;
+
+  const allQ = getCombinedQuestions();
+  if (quizIndex < allQ.length) {
+    render();
+  } else {
+    screen = 'loading';
+    render();
+    try {
+      await api('/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: myId,
+          name: draft.name,
+          dob: draft.dob,
+          gender: draft.gender,
+          userState: draft.userState,
+          answers: quizAnswers
+        })
+      });
+      screen = 'lobby';
+      startPolling();
+    } catch (e) {
+      errMsg = e.message;
+      screen = 'onboarding';
+      render();
+    }
+  }
+}
+
+async function resumeSession() {
+  const enterId = prompt("Enter your saved Resume ID:", myId);
+  if (enterId) {
+    myId = enterId.trim();
+    localStorage.setItem('circleMemberId', myId);
+    screen = 'loading';
+    render();
+    try {
+      const state = await api('/state');
+      if (state.members.some(m => m.id === myId)) {
+        screen = state.locked ? 'chat' : 'lobby';
+        startPolling();
+      } else {
+        alert("ID not found in current active round.");
+        screen = 'onboarding';
+      }
+    } catch (e) {
+      screen = 'onboarding';
+    }
+    render();
+  }
+}
+
+async function renderLobby() {
+  try {
+    const state = await api('/state');
+    if (state.locked) {
+      screen = 'chat';
+      renderChat();
+      return;
+    }
+
+    const hasNotif = 'Notification' in window && Notification.permission === 'granted';
+
+    app.innerHTML = `
+      <div class="card">
+        <div class="save-id-box" style="margin-bottom:14px;">
+          🔑 Resume ID: <strong>${myId}</strong>
+        </div>
+
+        <div style="background:rgba(217,180,106,0.12); border:1px solid var(--gold); border-radius:12px; padding:12px 14px; margin-bottom:16px; text-align:left;">
+          <div style="font-weight:600; font-size:13.5px; color:var(--gold-soft); margin-bottom:4px;">
+            🔔 Don't Miss Your Life Partner Chat!
+          </div>
+          <div style="font-size:12px; color:var(--muted); line-height:1.4; margin-bottom:8px;">
+            No need to wait staring at the screen. Enable notifications and you can safely switch tabs or close your phone. We won't spam you—only ping you the exact moment your match is revealed!
+          </div>
+          ${!hasNotif ? `
+            <button class="btn btn-gold" style="padding:8px 14px; font-size:12px; width:auto;" onclick="requestNotificationPermission()">
+              Enable Match Notifications 🔔
+            </button>
+          ` : `
+            <span style="font-size:11.5px; color:#6bc992;">✅ Notifications active! You can safely leave this tab open in the background.</span>
+          `}
+        </div>
+
+        <div class="eyebrow">Round ${state.round} • Synchronized Lobby</div>
+        <h1>Matching Matrix Active</h1>
+        <p class="sub">Analyzing 3-set responses across all participants...</p>
+
+        <div style="margin:20px 0;">
+          <div class="squad-bar-row">
+            <div class="squad-bar-label"><span>Women Joined</span><span>${state.womenCount} / 5</span></div>
+            <div class="squad-bar-track"><div class="squad-bar-fill" style="width:${(state.womenCount/5)*100}%; background:var(--woman);"></div></div>
+          </div>
+          <div class="squad-bar-row">
+            <div class="squad-bar-label"><span>Men Joined</span><span>${state.menCount} / 5</span></div>
+            <div class="squad-bar-track"><div class="squad-bar-fill" style="width:${(state.menCount/5)*100}%; background:var(--man);"></div></div>
+          </div>
+        </div>
+
+        <button class="btn btn-gold" onclick="triggerReveal()">Calculate & Reveal Matches ✨</button>
+      </div>
+    `;
+  } catch (e) {}
+}
+
+async function triggerReveal() {
+  try {
+    await api('/reveal', { method: 'POST' });
+    screen = 'chat';
+    render();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function renderChat() {
+  const state = await api('/state');
+  const myPair = state.pairs.find(p => p.womanId === myId || p.manId === myId);
+
+  if (!myPair) {
+    app.innerHTML = `
+      <div class="card">
+        <h2>Circle Unmatched This Round</h2>
+        <p class="sub">The circle will auto-loop into the next round shortly!</p>
+      </div>
+    `;
+    return;
+  }
+
+  // Trigger Notification when user enters Chat
+  notifyUserMatchFound(myPair.astroTitle, myPair.score);
+
+  app.innerHTML = `
+    <div class="card">
+      <div class="eyebrow">Match Breakdown • ${myPair.score}% Harmony Score</div>
+      <h2>${esc(myPair.astroTitle)}</h2>
+      <p class="sub" style="font-style:italic;">"${esc(myPair.why)}"</p>
+      
+      <div id="statusBanner" style="background:var(--surface-2); padding:10px 14px; border-radius:10px; font-size:13px; margin-bottom:14px; border:1px solid var(--line);">
+        Checking presence...
+      </div>
+
+      <div class="chat-box" id="chatBox" style="height:230px; overflow-y:auto; border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:12px;"></div>
+
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="chatInput" placeholder="Send a genuine message..." onkeypress="if(event.key==='Enter') sendChat('${myPair.womanId}', '${myPair.manId}')">
+        <button class="btn btn-gold" style="width:auto;" onclick="sendChat('${myPair.womanId}', '${myPair.manId}')">Send</button>
+      </div>
+    </div>
+  `;
+
+  loadChat(myPair.womanId, myPair.manId);
+}
+
+async function loadChat(wId, mId) {
+  try {
+    const res = await api(`/chat/${wId}/${mId}`);
+    const banner = document.getElementById('statusBanner');
+    
+    if (banner) {
+      if (!res.started) {
+        banner.innerHTML = `⏳ <strong>Waiting for partner to come online...</strong><br><span style="font-size:11.5px; color:var(--muted);">2-minute chat timer starts automatically when BOTH partners are in the room!</span>`;
+      } else {
+        banner.innerHTML = `🔥 <strong>Both Online! 2-Min Live Chat active: <span style="color:var(--gold);">${res.secsLeft}s remaining</span></strong>`;
+      }
+    }
+
+    const box = document.getElementById('chatBox');
+    if (!box) return;
+    box.innerHTML = res.messages.map(m => `
+      <div style="margin-bottom:8px; text-align:${m.sender === myId ? 'right' : 'left'};">
+        <span style="font-size:11px; color:var(--muted);">${esc(m.senderName)} • ${m.time}</span>
+        <div style="background:${m.sender === myId ? 'var(--gold)' : 'var(--surface-2)'}; color:${m.sender === myId ? '#1a1330' : 'var(--text)'}; display:inline-block; padding:8px 12px; border-radius:12px; max-width:80%; font-size:14px;">
+          ${esc(m.text)}
+        </div>
+      </div>
+    `).join('') || '<div style="color:var(--muted); font-size:13px;">No messages yet. Say hello! 👋</div>';
+    box.scrollTop = box.scrollHeight;
+  } catch (e) {}
+}
+
+async function sendChat(wId, mId) {
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
+  try {
+    await api(`/chat/${wId}/${mId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sender: myId, senderName: draft.name || 'You', text })
+    });
+    input.value = '';
+    loadChat(wId, mId);
+  } catch (e) {}
+}
+
+function startPolling() {
+  stopPolling();
+  sendHeartbeat();
+  heartbeatTimer = setInterval(sendHeartbeat, 5000);
+
+  pollTimer = setInterval(() => {
+    if (screen === 'lobby') renderLobby();
+    if (screen === 'chat') {
+      api('/state').then(st => {
+        const myPair = st.pairs.find(p => p.womanId === myId || p.manId === myId);
+        if (myPair) loadChat(myPair.womanId, myPair.manId);
       });
     }
+  }, 2500);
+}
+
+function stopPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+}
+
+// Boot up
+(async function init() {
+  try {
+    const st = await api('/state');
+    if (myId && st.members.some(m => m.id === myId)) {
+      screen = st.locked ? 'chat' : 'lobby';
+      startPolling();
+    } else {
+      screen = 'onboarding';
+    }
+  } catch (e) {
+    screen = 'onboarding';
   }
-
-  state.pairs = pairs;
-  state.locked = true;
-  saveData(state);
-
-  res.json({ success: true, count: pairs.length });
-});
-
-app.get('/api/chat/:woman/:man', (req, res) => {
-  let state = checkAutoLoop(loadData());
-  const key = chatKey(state.round, req.params.woman, req.params.man);
-  const chat = state.chats[key] || { messages: [], startedAt: null };
-
-  const wMem = state.members.find(m => m.id === req.params.woman);
-  const mMem = state.members.find(m => m.id === req.params.man);
-  const now = Date.now();
-
-  const wOnline = wMem && wMem.lastSeen && (now - wMem.lastSeen < 12000);
-  const mOnline = mMem && mMem.lastSeen && (now - mMem.lastSeen < 12000);
-  const bothOnline = wOnline && mOnline;
-
-  if (bothOnline && !chat.startedAt) {
-    chat.startedAt = now;
-    state.chats[key] = chat;
-    saveData(state);
-  }
-
-  let secsLeft = CHAT_WINDOW_MS / 1000;
-  if (chat.startedAt) {
-    secsLeft = Math.max(0, Math.round((chat.startedAt + CHAT_WINDOW_MS - now) / 1000));
-  }
-
-  res.json({ messages: chat.messages, bothOnline, wOnline, mOnline, started: !!chat.startedAt, secsLeft });
-});
-
-app.post('/api/chat/:woman/:man', (req, res) => {
-  let state = checkAutoLoop(loadData());
-  if (!state.locked) return res.status(409).json({ error: 'No active match.' });
-
-  const { sender, senderName, text } = req.body;
-  if (!text || !text.trim()) return res.status(400).json({ error: 'Empty message.' });
-
-  const key = chatKey(state.round, req.params.woman, req.params.man);
-  if (!state.chats[key]) state.chats[key] = { messages: [], startedAt: null };
-
-  state.chats[key].messages.push({
-    sender,
-    senderName,
-    text: text.trim(),
-    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  });
-
-  saveData(state);
-  res.json({ success: true });
-});
-
-app.listen(PORT, () => console.log(`The Circle backend running on port ${PORT}`));
+  render();
+})();
