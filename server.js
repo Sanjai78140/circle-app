@@ -11,7 +11,7 @@ const CHAT_WINDOW_MS = 2 * 60 * 1000; // 2 minutes
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ---------- AI Setup (Gemini / Anthropic) ----------
+// ---------- AI Setup (Gemini / Claude) ----------
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || null;
 const AI_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || null;
@@ -109,7 +109,7 @@ function computeAstroSynastry(signA, signB) {
   return { score: 0.75, title: 'Balanced Complementary Energies' };
 }
 
-// ---------- State Storage ----------
+// ---------- Persistence ----------
 function defaultState() {
   return { round: 1, members: [], locked: false, pairs: [], chats: {} };
 }
@@ -135,11 +135,9 @@ function chatKey(round, wId, mId) {
   return `${round}:${wId}:${mId}`;
 }
 
-// Auto-loop checking based on active chat countdowns
 function checkAutoLoop(state) {
   if (!state.locked || !state.pairs || state.pairs.length === 0) return state;
 
-  // Check if all active chats have finished their 2-minute timer
   const now = Date.now();
   let allFinished = true;
 
@@ -151,13 +149,12 @@ function checkAutoLoop(state) {
         allFinished = false;
       }
     } else {
-      // Chat hasn't started yet because both aren't online
       allFinished = false;
     }
   });
 
   if (allFinished && state.pairs.length > 0) {
-    console.log(`All chats completed for Round ${state.round}. Resetting Circle...`);
+    console.log(`All active chats finished for Round ${state.round}. Resetting Circle...`);
     state = { round: state.round + 1, members: [], locked: false, pairs: [], chats: {} };
     saveData(state);
   }
@@ -165,89 +162,89 @@ function checkAutoLoop(state) {
   return state;
 }
 
-// ---------- Matchmaking Algorithm ----------
+// ---------- Multi-Factor Matchmaking Scoring ----------
 function scorePair(w, m) {
   let sc = 0;
-  
-  // 1. Astro Synastry (30%)
+  const wAns = w.answers || {};
+  const mAns = m.answers || {};
+
+  // 1. Cross Match: Self vs Partner Expectations (35%)
+  if (wAns.myLook === mAns.partnerLook) sc += 8.75;
+  if (mAns.myLook === wAns.partnerLook) sc += 8.75;
+  if (wAns.selfVibe === mAns.partnerVibe) sc += 8.75;
+  if (mAns.selfVibe === wAns.partnerVibe) sc += 8.75;
+
+  // 2. Behavioral & Emotional Alignment (30%)
+  if (wAns.conflictStyle === mAns.conflictStyle) sc += 10;
+  if (wAns.loveLanguage === mAns.loveLanguage) sc += 10;
+  if (wAns.intention === mAns.intention) sc += 10;
+
+  // 3. Cultural & Regional Scenario Alignment (20%)
+  if (w.state && m.state && w.state.toLowerCase() === m.state.toLowerCase()) sc += 10;
+  if (wAns.foodPreference === mAns.foodPreference) sc += 5;
+  if (wAns.cinemaVibe === mAns.cinemaVibe) sc += 5;
+
+  // 4. Zodiac Synastry (15%)
   const astro = computeAstroSynastry(w.sunSign, m.sunSign);
-  sc += astro.score * 30;
-
-  // 2. State & Culture Proximity (15%)
-  if (w.state && m.state && w.state.toLowerCase() === m.state.toLowerCase()) {
-    sc += 15;
-  } else {
-    sc += 8;
-  }
-
-  // 3. Look & Vibe Fit (25%)
-  if (w.answers?.myLook === m.answers?.partnerLook) sc += 12.5;
-  if (m.answers?.myLook === w.answers?.partnerLook) sc += 12.5;
-
-  // 4. Deep Intentions & Values (30%)
-  if (w.answers?.intention === m.answers?.intention) sc += 15;
-  if (w.answers?.conflictStyle === m.answers?.conflictStyle) sc += 15;
+  sc += astro.score * 15;
 
   return Math.min(99, Math.round(sc));
 }
 
 async function aiWhyMatch(w, m, score) {
-  const prompt = `Write a 2-sentence warm match breakdown for a couple.
-Woman: ${w.name} from ${w.state || 'India'} (Sun Sign: ${w.sunSign}).
-Man: ${m.name} from ${m.state || 'India'} (Sun Sign: ${m.sunSign}).
-Compatibility: ${score}%.
-Explain why their zodiac signs, regional chemistry, and relationship intentions create a genuine bond. Use friendly, local cultural warmth.`;
+  const prompt = `Write a warm, authentic 2-sentence match breakdown for a couple.
+Woman: ${w.name} from ${w.state \vert{}\vert{} 'India'} (Sun Sign:${w.sunSign}).
+Man: ${m.name} from ${m.state \vert{}\vert{} 'India'} (Sun Sign:${m.sunSign}).
+Score: ${score}%.
+Explain why their physical preferences, emotional compatibility, and regional energy make them a high-trust match.`;
 
-  const aiText = await callAI("You are a warm, cultural cosmic matchmaking guide.", prompt, 150, false);
-  return aiText || `${w.name} (${w.sunSign}) and ${m.name} (${m.sunSign}) share a dynamic ${score}% bond with matching real-life values and cosmic synergy!`;
+  const aiText = await callAI("You are a warm, cultural cosmic matchmaker.", prompt, 150, false);
+  return aiText || `${w.name} (${w.sunSign}) and${m.name} (${m.sunSign}) hit a high${score}% match with strong physical, emotional, and cultural harmony!`;
 }
 
-// ---------- Dynamic AI Regional Questions Route ----------
+// ---------- Routes ----------
 app.post('/api/ai-questions', async (req, res) => {
   const { userState } = req.body;
-  const prompt = `Generate 2 wholesome, realistic scenario matchmaking questions tailored for someone living in "${userState || 'India'}". 
-If the state is Tamil Nadu, mix light Tanglish/Tamil vibes. If North India/Delhi, use light Hinglish. Otherwise, warm Indian English.
-Return strictly valid JSON format like this:
+  const prompt = `Generate 2 Tanglish/Tamil-vibe real-world scenario questions for someone in "${userState || 'Tamil Nadu'}".
+Focus on food debates (Biriyani vs Parotta), monsoon coffee/bajjis, or long ECR drives.
+Return JSON array format:
 [
   {
-    "key": "regionalScenario",
+    "key": "dynamicTanglishScenario",
     "emoji": "☕",
-    "title": "Weekend Vibe",
-    "question": "Scenario question text here...",
+    "title": "Local Vibe Check",
+    "question": "Scenario text...",
     "opts": ["Option A", "Option B", "Option C", "Option D"]
   }
 ]`;
 
   try {
-    const raw = await callAI("You are a creative matchmaking prompt generator. Return JSON array only.", prompt, 400, true);
+    const raw = await callAI("You are a dynamic prompt generator. Return JSON array only.", prompt, 350, true);
     if (raw) {
       const parsed = JSON.parse(raw.trim());
       return res.json({ questions: parsed });
     }
-  } catch (e) {
-    console.error("AI question error:", e.message);
-  }
+  } catch (e) {}
 
-  // Fallback default regional scenario
+  // Fallback static Tanglish questions
   res.json({
     questions: [
       {
-        key: 'regionalScenario',
-        emoji: '🌆',
-        title: 'The Weekend Hangout',
-        question: `You're spending a free evening in ${userState || 'your city'}. What sounds like your perfect hangout?`,
+        key: 'foodPreference',
+        emoji: '🍛',
+        title: 'Foodie Connection',
+        question: 'Namma ooroda classic weekend food debate! What is your absolute non-negotiable favorite?',
         opts: [
-          'A quiet local café with deep conversation.',
-          'Exploring street food joints with energetic music.',
-          'A long peaceful drive away from traffic.',
-          'Staying indoors watching movies with favorite food.'
+          'ECR Parotta & Pepper Chicken gravy!',
+          'Authentic Ambur / Dindigul Biriyani.',
+          'Simple Home-cooked Sambar & Potato fry.',
+          'Modern Café food (Burgers & Pasta).'
         ]
       }
     ]
   });
 });
 
-// ---------- Express Routes ----------
 app.get('/api/state', (req, res) => {
   let state = checkAutoLoop(loadData());
   res.json({
@@ -275,7 +272,6 @@ app.post('/api/heartbeat', (req, res) => {
 app.post('/api/join', (req, res) => {
   let state = checkAutoLoop(loadData());
   if (state.locked) return res.status(409).json({ error: 'Circle is locked.' });
-  if (state.members.length >= 10) return res.status(409).json({ error: 'Circle is full.' });
 
   const { id, name, dob, gender, userState, answers } = req.body;
   if (!name || !dob || !gender) return res.status(400).json({ error: 'Missing core details.' });
@@ -283,7 +279,6 @@ app.post('/api/join', (req, res) => {
   const memberId = id || ('mem_' + Math.random().toString(36).slice(2, 9));
   const sunSign = calculateSunSign(dob);
 
-  // Update existing member if re-logging in or push new
   const existingIdx = state.members.findIndex(m => m.id === memberId);
   const memberObj = { id: memberId, name, dob, gender, state: userState || 'Tamil Nadu', sunSign, answers: answers || {}, lastSeen: Date.now() };
 
@@ -349,7 +344,6 @@ app.get('/api/chat/:woman/:man', (req, res) => {
   const key = chatKey(state.round, req.params.woman, req.params.man);
   const chat = state.chats[key] || { messages: [], startedAt: null };
 
-  // Check if both users are currently active (seen within last 12 seconds)
   const wMem = state.members.find(m => m.id === req.params.woman);
   const mMem = state.members.find(m => m.id === req.params.man);
   const now = Date.now();
@@ -358,26 +352,18 @@ app.get('/api/chat/:woman/:man', (req, res) => {
   const mOnline = mMem && mMem.lastSeen && (now - mMem.lastSeen < 12000);
   const bothOnline = wOnline && mOnline;
 
-  // Start chat timer ONLY when both are online for the first time
   if (bothOnline && !chat.startedAt) {
     chat.startedAt = now;
     state.chats[key] = chat;
     saveData(state);
   }
 
-  let secsLeft = CHAT_WINDOW_MS / 1000; // 120s default
+  let secsLeft = CHAT_WINDOW_MS / 1000;
   if (chat.startedAt) {
     secsLeft = Math.max(0, Math.round((chat.startedAt + CHAT_WINDOW_MS - now) / 1000));
   }
 
-  res.json({
-    messages: chat.messages,
-    bothOnline,
-    wOnline,
-    mOnline,
-    started: !!chat.startedAt,
-    secsLeft
-  });
+  res.json({ messages: chat.messages, bothOnline, wOnline, mOnline, started: !!chat.startedAt, secsLeft });
 });
 
 app.post('/api/chat/:woman/:man', (req, res) => {
@@ -401,6 +387,4 @@ app.post('/api/chat/:woman/:man', (req, res) => {
   res.json({ success: true });
 });
 
-app.listen(PORT, () => {
-  console.log(`The Circle Server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`The Circle backend running on port ${PORT}`));
