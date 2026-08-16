@@ -1,12 +1,10 @@
 const app = document.getElementById('app');
 
-// User State Persistence
 let myId = localStorage.getItem('circleMemberId') || generateId();
 localStorage.setItem('circleMemberId', myId);
 
 let quizAnswers = {};
 let quizIndex = 0;
-let quizSet = 1; // 1 = Self & Looks, 2 = Partner Preferences & Intentions
 let dynamicRegionalQuestions = [];
 let screen = 'loading';
 let pollTimer = null;
@@ -18,77 +16,105 @@ function generateId() {
   return 'CIRC_' + Math.random().toString(36).substring(2, 7).toUpperCase();
 }
 
-// ---------------- QUIZ QUESTION SETS ----------------
+// ---------- 3-SET QUESTION ARCHITECTURE ----------
 
-// SET 1: Self Taste, Looks & Regional Identity
+// SET 1: Full about the User (Self & Complexion/Style)
 const SET_1_QUESTIONS = [
   {
     key: 'myLook',
-    emoji: '✨',
-    title: 'Set 1: Express Your Aesthetic & Style',
-    question: 'How would you best describe your personal look and style?',
+    emoji: '👤',
+    title: 'SET 1: All About You — Appearance & Style',
+    question: 'How would you best describe your own physical look & skin tone/style?',
     opts: [
-      'Minimalistic, neat & comfortable modern wear.',
-      'Traditional, elegant & classic cultural outfits.',
-      'Trendy, bold, stylish & street fashion.',
-      'Casual, cozy & effortless everyday look.'
+      'Dusky / Dark skin tone with sharp features & natural charm.',
+      'Fair / Warm tone with a clean, neat & minimalist look.',
+      'Medium / Olive skin tone with an expressive smile & eyes.',
+      'Traditional aesthetic (Veshti/Saree look carries me best).'
     ]
   },
   {
     key: 'selfVibe',
     emoji: '⚡',
-    title: 'Set 1: Your Natural Vibe',
-    question: 'How do people usually perceive your energy when they meet you?',
+    title: 'SET 1: All About You — Natural Energy',
+    question: 'What energy do you naturally bring into a relationship?',
     opts: [
-      'Warm, gentle & soft-spoken listener.',
-      'Energetic, witty, funny & talkative.',
-      'Calm, grounded, intelligent & observant.',
-      'Bold, passionate, direct & spontaneous.'
+      'Calm, loyal, protective & deeply grounded.',
+      'Witty, energetic, talkative & full of humor.',
+      'Soft-spoken, attentive listener & empathetic.',
+      'Bold, passionate, spontaneous & adventurous.'
     ]
   }
 ];
 
-// SET 2: Partner Preferences & Deep Intentions
+// SET 2: What They Expect From Partner
 const SET_2_QUESTIONS = [
   {
     key: 'partnerLook',
     emoji: '👁️',
-    title: 'Set 2: What Catches Your Eye in a Partner?',
-    question: 'What visual style or vibe do you admire most in a partner?',
+    title: 'SET 2: Partner Expectations — Appearance',
+    question: 'What complexion or visual style do you find most attractive in a partner?',
     opts: [
-      'Simple, clean-cut, genuine & subtle presentation.',
-      'Traditional charm, expressive eyes & cultural touch.',
-      'Stylish confidence, sharp dressing & strong posture.',
-      'Relaxed, cozy, approachable & friendly vibe.'
+      'Dusky / Dark skin guys or girls with sharp, natural charm.',
+      'Fair / Warm tones with a neat & minimalist style.',
+      'Complexion doesn’t matter—smile & posture win me over.',
+      'Traditional look (Saree / Veshti-Kurta look instantly wins!).'
+    ]
+  },
+  {
+    key: 'partnerVibe',
+    emoji: '💖',
+    title: 'SET 2: Partner Expectations — Personality Vibe',
+    question: 'What personality archetype are you looking for?',
+    opts: [
+      'Best-friend vibe: Fun, teasing & easy to talk to.',
+      'Protective & caring: Mature, strong & reliable.',
+      'Calm & gentle: Peaceful, quiet & deeply understanding.',
+      'High energy: Passionate, ambitious & adventurous.'
+    ]
+  }
+];
+
+// SET 3: How They Behaviorally Act & Trust-Building Deep Questions
+const SET_3_QUESTIONS = [
+  {
+    key: 'conflictStyle',
+    emoji: '🕊️',
+    title: 'SET 3: How You Act — Conflict Management',
+    question: 'When an argument or misunderstanding happens, how do you handle it?',
+    opts: [
+      'Talk it out immediately with calm honesty—no hiding.',
+      'Take a short quiet pause to cool off, then resolve gently.',
+      'Use light humor or a hug first to ease the tension.',
+      'Write down thoughts to communicate clearly without emotion.'
+    ]
+  },
+  {
+    key: 'loveLanguage',
+    emoji: '💌',
+    title: 'SET 3: How You Act — Love Language',
+    question: 'How do you express deep love & trust in daily life?',
+    opts: [
+      'Quality time & long un-interrupted conversations.',
+      'Acts of service (doing thoughtful small things for them).',
+      'Words of affirmation (reminding them often how special they are).',
+      'Physical touch, warm hugs & hand-holding.'
     ]
   },
   {
     key: 'intention',
     emoji: '💍',
-    title: 'Set 2: Deep Intention & Goals',
-    question: 'Be honest—what are you looking to build through this connection?',
+    title: 'SET 3: Deep Goal — Trust & Commitment',
+    question: 'What is your genuine goal with this process?',
     opts: [
-      'A deep, long-term romantic relationship leading to marriage.',
-      'A meaningful connection to see where chemistry takes us.',
-      'A best-friend-first relationship built on trust and laughs.',
-      'Companionship with someone who shares my core values.'
-    ]
-  },
-  {
-    key: 'conflictStyle',
-    emoji: '🕊️',
-    title: 'Set 2: Emotional Maturity & Conflict',
-    question: 'When a misunderstanding happens, what is your approach to healing it?',
-    opts: [
-      'Talk it out immediately with calm honesty.',
-      'Take a short quiet pause, then come together to resolve it.',
-      'Use light humor & a gentle hug to ease tension first.',
-      'Write down thoughts to communicate without emotion.'
+      'Long-term serious connection leading to marriage.',
+      'Meaningful relationship built on mutual respect & trust.',
+      'Best-friends first to build strong natural chemistry.',
+      'Exploring true compatibility without pressure.'
     ]
   }
 ];
 
-// ---------------- HELPER FUNCTIONS ----------------
+// ---------- HELPERS & API ----------
 function esc(s) {
   return (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -112,7 +138,7 @@ function sendHeartbeat() {
   }
 }
 
-// ---------------- RENDER VIEWS ----------------
+// ---------- RENDER VIEWS ----------
 function render() {
   if (screen === 'loading') renderLoading();
   else if (screen === 'onboarding') renderOnboarding();
@@ -122,7 +148,7 @@ function render() {
 }
 
 function renderLoading() {
-  app.innerHTML = `<div class="card"><div class="sub">Connecting to The Circle...</div></div>`;
+  app.innerHTML = `<div class="card"><div class="sub">Analyzing Compatibility Matrix...</div></div>`;
 }
 
 function renderOnboarding() {
@@ -130,27 +156,27 @@ function renderOnboarding() {
     <div class="card">
       <div class="save-id-box">
         🔑 <strong>Your Resume ID: <span style="color:var(--gold);">${myId}</span></strong>
-        <div style="font-size:11.5px; margin-top:3px; color:var(--muted);">Save this ID! You can re-enter anytime to check who matched with you.</div>
+        <div style="font-size:11.5px; margin-top:3px; color:var(--muted);">Save this ID to re-login on any tab/device and check matched results!</div>
       </div>
 
       <div class="honest-banner">
-        ✨ <strong>Welcome to The Circle</strong><br>
-        Please be genuine and answer honestly—let's see the magic happen!
+        ✨ <strong>Trust the Process</strong><br>
+        Answer genuinely across all 3 question sets. Let's see the magic happen!
       </div>
 
       <label class="field-label">Your Name or Nickname</label>
-      <input type="text" id="inName" value="${esc(draft.name)}" placeholder="e.g. Rahul / Ananya">
+      <input type="text" id="inName" value="${esc(draft.name)}" placeholder="e.g. Vikram / Priya">
 
-      <label class="field-label">Date of Birth (Calculates Sun Sign)</label>
+      <label class="field-label">Date of Birth (For Zodiac Synastry)</label>
       <input type="date" id="inDob" value="${esc(draft.dob)}">
 
-      <label class="field-label">Where are you from? (State / Region)</label>
+      <label class="field-label">Your State / Region</label>
       <select id="inState">
         <option value="Tamil Nadu" ${draft.userState==='Tamil Nadu'?'selected':''}>Tamil Nadu (Tanglish Scenarios)</option>
         <option value="Karnataka" ${draft.userState==='Karnataka'?'selected':''}>Karnataka</option>
         <option value="Kerala" ${draft.userState==='Kerala'?'selected':''}>Kerala</option>
         <option value="Maharashtra" ${draft.userState==='Maharashtra'?'selected':''}>Maharashtra</option>
-        <option value="Delhi / North India" ${draft.userState==='Delhi / North India'?'selected':''}>Delhi / North India (Hinglish Scenarios)</option>
+        <option value="Delhi / North India" ${draft.userState==='Delhi / North India'?'selected':''}>Delhi / North India</option>
         <option value="Other / International" ${draft.userState==='Other / International'?'selected':''}>Other / International</option>
       </select>
 
@@ -162,10 +188,10 @@ function renderOnboarding() {
 
       ${errMsg ? `<div class="err">${esc(errMsg)}</div>` : ''}
 
-      <button class="btn btn-gold" onclick="startQuizSet1()">Start Set 1: My Style & Vibe ✨</button>
+      <button class="btn btn-gold" onclick="startFullQuiz()">Begin 3-Stage Compatibility Quiz ✨</button>
       
       <div style="margin-top:16px; text-align:center;">
-        <span style="font-size:12px; color:var(--muted); cursor:pointer; text-decoration:underline;" onclick="resumeSession()">Already joined? Check my match status</span>
+        <span style="font-size:12px; color:var(--muted); cursor:pointer; text-decoration:underline;" onclick="resumeSession()">Already registered? Check match status</span>
       </div>
     </div>
   `;
@@ -179,7 +205,7 @@ function selectGender(g) {
   render();
 }
 
-async function startQuizSet1() {
+async function startFullQuiz() {
   draft.name = document.getElementById('inName').value.trim();
   draft.dob = document.getElementById('inDob').value;
   draft.userState = document.getElementById('inState').value;
@@ -194,7 +220,6 @@ async function startQuizSet1() {
   screen = 'loading';
   render();
 
-  // Fetch AI Dynamic Regional Questions based on State
   try {
     const aiRes = await api('/ai-questions', {
       method: 'POST',
@@ -206,11 +231,14 @@ async function startQuizSet1() {
     dynamicRegionalQuestions = [];
   }
 
-  quizSet = 1;
   quizIndex = 0;
   quizAnswers = {};
   screen = 'quiz';
   render();
+}
+
+function getCombinedQuestions() {
+  return [...SET_1_QUESTIONS, ...SET_2_QUESTIONS, ...SET_3_QUESTIONS, ...dynamicRegionalQuestions];
 }
 
 function renderQuiz() {
@@ -221,7 +249,7 @@ function renderQuiz() {
 
   app.innerHTML = `
     <div class="card">
-      <div class="eyebrow">${q.emoji} Question ${quizIndex + 1} of ${totalQ}</div>
+      <div class="eyebrow">${q.emoji} Step ${quizIndex + 1} of ${totalQ}</div>
       <div class="squad-bar-track" style="margin-bottom:18px;">
         <div class="squad-bar-fill" style="width:${progress}%; background:var(--gold);"></div>
       </div>
@@ -240,10 +268,6 @@ function renderQuiz() {
   `;
 }
 
-function getCombinedQuestions() {
-  return [...SET_1_QUESTIONS, ...dynamicRegionalQuestions, ...SET_2_QUESTIONS];
-}
-
 async function answerQuestion(key, val) {
   quizAnswers[key] = val;
   quizIndex++;
@@ -252,11 +276,10 @@ async function answerQuestion(key, val) {
   if (quizIndex < allQ.length) {
     render();
   } else {
-    // Complete Registration
     screen = 'loading';
     render();
     try {
-      const res = await api('/join', {
+      await api('/join', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -291,7 +314,7 @@ async function resumeSession() {
         screen = state.locked ? 'chat' : 'lobby';
         startPolling();
       } else {
-        alert("ID not found in current round. You can join fresh!");
+        alert("ID not found in current active round.");
         screen = 'onboarding';
       }
     } catch (e) {
@@ -317,8 +340,8 @@ async function renderLobby() {
         </div>
 
         <div class="eyebrow">Round ${state.round} • Synchronized Lobby</div>
-        <h1>The Circle is Filling</h1>
-        <p class="sub">Once men and women join, pairings will trigger automatically.</p>
+        <h1>Matching Matrix Active</h1>
+        <p class="sub">Analyzing 3-set responses across all participants...</p>
 
         <div style="margin:20px 0;">
           <div class="squad-bar-row">
@@ -331,7 +354,7 @@ async function renderLobby() {
           </div>
         </div>
 
-        <button class="btn btn-gold" onclick="triggerReveal()">Reveal Cosmic Matches ✨</button>
+        <button class="btn btn-gold" onclick="triggerReveal()">Calculate & Reveal Matches ✨</button>
       </div>
     `;
   } catch (e) {}
@@ -363,7 +386,7 @@ async function renderChat() {
 
   app.innerHTML = `
     <div class="card">
-      <div class="eyebrow">Cosmic Synergy • ${myPair.score}% Match</div>
+      <div class="eyebrow">Match Breakdown • ${myPair.score}% Harmony Score</div>
       <h2>${esc(myPair.astroTitle)}</h2>
       <p class="sub" style="font-style:italic;">"${esc(myPair.why)}"</p>
       
@@ -390,7 +413,7 @@ async function loadChat(wId, mId) {
     
     if (banner) {
       if (!res.started) {
-        banner.innerHTML = `⏳ <strong>Waiting for partner to come online...</strong><br><span style="font-size:11.5px; color:var(--muted);">Timer will start automatically as soon as BOTH of you are in the chat room!</span>`;
+        banner.innerHTML = `⏳ <strong>Waiting for partner to come online...</strong><br><span style="font-size:11.5px; color:var(--muted);">2-minute chat timer starts automatically when BOTH partners are in the room!</span>`;
       } else {
         banner.innerHTML = `🔥 <strong>Both Online! 2-Min Live Chat active: <span style="color:var(--gold);">${res.secsLeft}s remaining</span></strong>`;
       }
