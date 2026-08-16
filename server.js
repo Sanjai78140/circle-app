@@ -1,35 +1,33 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DATA_DIR = process.env.DATA_DIR || __dirname;
-const DATA_FILE = path.join(DATA_DIR, 'data.json');
-const MAX_MEMBERS = 10;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+const DATA_FILE = path.join(__dirname, 'data.json');
+
+// Initialize default data file if not present
 function loadData() {
+  if (!fs.existsSync(DATA_FILE)) {
+    const defaultData = { round: 1, locked: false, members: [], pairs: [], chats: {} };
+    fs.writeFileSync(DATA_FILE, JSON.stringify(defaultData, null, 2));
+    return defaultData;
+  }
   try {
-    if (!fs.existsSync(DATA_FILE)) {
-      const init = { round: 1, members: [], locked: false, lockedAt: null, pairs: [], unmatched: [], chats: {} };
-      fs.writeFileSync(DATA_FILE, JSON.stringify(init, null, 2));
-      return init;
-    }
     return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
   } catch (e) {
-    return { round: 1, members: [], locked: false, lockedAt: null, pairs: [], unmatched: [], chats: {} };
+    return { round: 1, locked: false, members: [], pairs: [], chats: {} };
   }
 }
 
 function saveData(data) {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-  } catch (e) {}
+  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
+// Zodiac Mapping to Elements
 const ZODIAC_ELEMENTS = {
   Aries: 'Fire', Leo: 'Fire', Sagittarius: 'Fire',
   Taurus: 'Earth', Virgo: 'Earth', Capricorn: 'Earth',
@@ -37,181 +35,192 @@ const ZODIAC_ELEMENTS = {
   Cancer: 'Water', Scorpio: 'Water', Pisces: 'Water'
 };
 
-const COMPAT = {
-  Fire: { Fire: 0.85, Air: 0.95, Earth: 0.4, Water: 0.3 },
-  Air: { Fire: 0.95, Air: 0.8, Earth: 0.5, Water: 0.4 },
-  Earth: { Earth: 0.85, Water: 0.95, Fire: 0.4, Air: 0.5 },
-  Water: { Water: 0.9, Earth: 0.95, Fire: 0.3, Air: 0.4 }
-};
+// Calculate Astrological Compatibility (25% Weight)
+function getAstroScore(signA, signB) {
+  const elemA = ZODIAC_ELEMENTS[signA] || 'Fire';
+  const elemB = ZODIAC_ELEMENTS[signB] || 'Fire';
 
-function scorePair(w, m) {
-  const wAns = w.answers || {};
-  const mAns = m.answers || {};
-  
+  if (elemA === elemB) return 90;
+  if ((elemA === 'Fire' && elemB === 'Air') || (elemA === 'Air' && elemB === 'Fire')) return 95;
+  if ((elemA === 'Earth' && elemB === 'Water') || (elemA === 'Water' && elemB === 'Earth')) return 95;
+  return 40;
+}
+
+// Calculate Behavioral Difference Score (75% Weight)
+function getBehaviorScore(ansA = {}, ansB = {}) {
+  const keys = Object.keys(ansA);
+  if (keys.length === 0) return 50;
+
   let totalDiff = 0;
   let count = 0;
-  const dims = [
-    'about_me', 'ideal_self', 'thought_depth', 'partner_trait', 'vibe_check',
-    'conflict_logic', 'love_language', 'taste_food', 'music_vibe', 'weekend_energy',
-    'communication_style', 'future_vision', 'humor_style', 'trust_pace',
-    'growth_mindset', 'financial_logic', 'travel_style', 'social_battery',
-    'relationship_goal', 'spontaneity'
-  ];
-  
-  dims.forEach(d => {
-    if (wAns[d] !== undefined && mAns[d] !== undefined) {
-      totalDiff += Math.abs(wAns[d] - mAns[d]);
+
+  for (const k of keys) {
+    if (ansB[k] !== undefined) {
+      totalDiff += Math.abs(Number(ansA[k]) - Number(ansB[k]));
       count++;
     }
-  });
+  }
 
-  const avgDiff = count > 0 ? totalDiff / count : 2;
-  const behaviorScore = Math.max(0, 100 - (avgDiff * 25));
-
-  const wEl = ZODIAC_ELEMENTS[w.zodiac] || 'Air';
-  const mEl = ZODIAC_ELEMENTS[m.zodiac] || 'Air';
-  const astroRatio = (COMPAT[wEl] && COMPAT[wEl][mEl]) ? COMPAT[wEl][mEl] : 0.7;
-  const astroScore = astroRatio * 100;
-
-  const finalScore = Math.round((behaviorScore * 0.75) + (astroScore * 0.25));
-  return Math.min(99, Math.max(50, finalScore));
+  if (count === 0) return 50;
+  const avgDiff = totalDiff / count;
+  return Math.max(0, 100 - (avgDiff * 25));
 }
 
-function chatKey(round, wId, mId) {
-  return `r${round}_${wId}_${mId}`;
+// Generates an emotional summary explaining the connection
+function generateEmotionalSummary(userA, userB, score) {
+  const ansA = userA.answers || {};
+  const ansB = userB.answers || {};
+  const shared = [];
+
+  if (ansA.love_language && ansA.love_language === ansB.love_language) {
+    shared.push("express love in the exact same emotional language");
+  }
+  if (ansA.weekend_energy && ansA.weekend_energy === ansB.weekend_energy) {
+    shared.push("share the same weekend pace and comfort energy");
+  }
+  if (ansA.conflict_logic && ansA.conflict_logic === ansB.conflict_logic) {
+    shared.push("handle life’s choices with aligned logic");
+  }
+  if (ansA.music_vibe && ansA.music_vibe === ansB.music_vibe) {
+    shared.push("vibe to the same inner musical rhythm");
+  }
+
+  if (shared.length > 0) {
+    return `✨ You connected at a remarkable ${score}% score! The stars aligned because you both ${shared.join(" and ")}, bringing rare harmony to this circle.`;
+  }
+  return `✨ Higher than a ${score}% deep resonance! Your mindsets and life visions complement each other beautifully, paving the way for an effortless conversation.`;
 }
 
-// REST Endpoints
+// Core Matchmaking Routine (75% Threshold Cutoff)
+function runMatchmaking(data) {
+  const women = data.members.filter(m => m.gender === 'woman' && m.complete);
+  const men = data.members.filter(m => m.gender === 'man' && m.complete);
+  const pairs = [];
+  const matchedIds = new Set();
+
+  for (const w of women) {
+    if (matchedIds.has(w.id)) continue;
+    let bestMatch = null;
+    let highestScore = 0;
+
+    for (const m of men) {
+      if (matchedIds.has(m.id)) continue;
+
+      const behScore = getBehaviorScore(w.answers, m.answers);
+      const astroScore = getAstroScore(w.zodiac, m.zodiac);
+      const totalScore = Math.round((behScore * 0.75) + (astroScore * 0.25));
+
+      // Cutoff Rule: Must be >= 75%
+      if (totalScore >= 75 && totalScore > highestScore) {
+        highestScore = totalScore;
+        bestMatch = m;
+      }
+    }
+
+    if (bestMatch) {
+      matchedIds.add(w.id);
+      matchedIds.add(bestMatch.id);
+
+      const summary = generateEmotionalSummary(w, bestMatch, highestScore);
+      const pairKey = `${w.id}_${bestMatch.id}`;
+
+      pairs.push({
+        womanId: w.id,
+        womanName: w.name,
+        manId: bestMatch.id,
+        manName: bestMatch.name,
+        score: highestScore,
+        summary: summary
+      });
+
+      if (!data.chats[pairKey]) {
+        data.chats[pairKey] = [
+          {
+            sender: 'system',
+            senderName: 'The Circle',
+            text: summary,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }
+        ];
+      }
+    }
+  }
+
+  data.pairs = pairs;
+  data.locked = pairs.length > 0;
+  return data;
+}
+
+// --- API ENDPOINTS ---
+
 app.get('/api/state', (req, res) => {
-  res.json(loadData());
-});
-
-app.post('/api/join', (req, res) => {
-  let state = loadData();
-  if (state.locked) return res.status(409).json({ error: 'Current circle is locked.' });
-  if (state.members.length >= MAX_MEMBERS) return res.status(409).json({ error: 'Lobby is full (10/10).' });
-
-  const { name, age, dob, gender, zodiac, location } = req.body;
-  if (!name || !gender) return res.status(400).json({ error: 'Missing basic details' });
-  
-  const existing = state.members.find(m => m.id === req.body.id);
-  if (existing) return res.json({ id: existing.id, member: existing });
-
-  const id = 'circle_' + Math.random().toString(36).substring(2, 9);
-  const newMember = {
-    id, name, age, dob, gender, zodiac, location,
-    answers: {}, complete: false, joinedAt: Date.now()
-  };
-  
-  state.members.push(newMember);
-  saveData(state);
-  res.json({ id, member: newMember });
-});
-
-app.post('/api/answers', (req, res) => {
-  let state = loadData();
-  const { id, answers } = req.body;
-  const m = state.members.find(x => x.id === id);
-  if (!m) return res.status(404).json({ error: 'Member not found' });
-  
-  m.answers = answers;
-  m.complete = true;
-  saveData(state);
-  res.json({ success: true });
+  const data = loadData();
+  res.json({ round: data.round, locked: data.locked, members: data.members, pairs: data.pairs });
 });
 
 app.get('/api/me/:id', (req, res) => {
-  let state = loadData();
-  const m = state.members.find(x => x.id === req.params.id);
-  if (!m) return res.status(404).json({ error: 'Not found' });
-  res.json(m);
+  const data = loadData();
+  const user = data.members.find(m => m.id === req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json(user);
+});
+
+app.post('/api/join', (req, res) => {
+  const { name, gender, zodiac } = req.body;
+  if (!name || !gender) return res.status(400).json({ error: 'Name and gender required' });
+
+  const data = loadData();
+  const id = 'circle_' + Math.random().toString(36).substring(2, 7);
+  const newMember = { id, name, gender, zodiac: zodiac || 'Aries', complete: false, answers: {} };
+
+  data.members.push(newMember);
+  saveData(data);
+  res.json({ id });
+});
+
+app.post('/api/answers', (req, res) => {
+  const { id, answers } = req.body;
+  const data = loadData();
+  const user = data.members.find(m => m.id === id);
+
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  user.answers = answers;
+  user.complete = true;
+
+  saveData(data);
+  res.json({ success: true });
 });
 
 app.post('/api/reveal', (req, res) => {
-  let state = loadData();
-  if (state.locked) return res.json(state);
-
-  const women = state.members.filter(m => m.gender === 'woman' && m.complete);
-  const men = state.members.filter(m => m.gender === 'man' && m.complete);
-
-  if (women.length === 0 || men.length === 0) {
-    return res.status(400).json({ error: 'Need at least one woman and one man in lobby.' });
-  }
-
-  let candidates = [];
-  women.forEach(w => {
-    men.forEach(m => {
-      candidates.push({ woman: w, man: m, score: scorePair(w, m) });
-    });
-  });
-
-  candidates.sort((a, b) => b.score - a.score);
-
-  const matchedW = new Set();
-  const matchedM = new Set();
-  const pairs = [];
-
-  candidates.forEach(c => {
-    if (!matchedW.has(c.woman.id) && !matchedM.has(c.man.id)) {
-      matchedW.add(c.woman.id);
-      matchedM.add(c.man.id);
-      pairs.push({
-        womanId: c.woman.id,
-        manId: c.man.id,
-        womanName: c.woman.name,
-        manName: c.man.name,
-        score: c.score,
-        reason: `Matched with ${c.score}% compatibility based on core values, tastes, logic, and lifestyle alignment!`
-      });
-      
-      const key = chatKey(state.round, c.woman.id, c.man.id);
-      state.chats[key] = {
-        messages: [{
-          sender: 'system',
-          senderName: '⚡ Circle System',
-          text: '🔥 MATCH CONNECTED! Take your good time to chat here, exchange contact info, or move over to WhatsApp/Instagram whenever you like. Wish you both amazing vibes! 💖',
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }]
-      };
-    }
-  });
-
-  const unmatched = state.members.filter(m => !matchedW.has(m.id) && !matchedM.has(m.id));
-
-  state.locked = true;
-  state.lockedAt = Date.now();
-  state.pairs = pairs;
-  state.unmatched = unmatched.map(u => ({ id: u.id, name: u.name }));
-
-  saveData(state);
-  res.json(state);
+  let data = loadData();
+  data = runMatchmaking(data);
+  saveData(data);
+  res.json({ locked: data.locked, pairs: data.pairs });
 });
 
-app.get('/api/chat/:woman/:man', (req, res) => {
-  let state = loadData();
-  const key = chatKey(state.round, req.params.woman, req.params.man);
-  const chat = state.chats[key] || { messages: [] };
-  res.json({ messages: chat.messages });
+app.get('/api/chat/:wId/:mId', (req, res) => {
+  const data = loadData();
+  const pairKey = `${req.params.wId}_${req.params.mId}`;
+  res.json({ messages: data.chats[pairKey] || [] });
 });
 
-app.post('/api/chat/:woman/:man', (req, res) => {
-  let state = loadData();
+app.post('/api/chat/:wId/:mId', (req, res) => {
   const { sender, senderName, text } = req.body;
-  if (!text || !text.trim()) return res.status(400).json({ error: 'Empty message.' });
+  const data = loadData();
+  const pairKey = `${req.params.wId}_${req.params.mId}`;
 
-  const key = chatKey(state.round, req.params.woman, req.params.man);
-  if (!state.chats[key]) state.chats[key] = { messages: [] };
-
-  const msg = {
+  if (!data.chats[pairKey]) data.chats[pairKey] = [];
+  data.chats[pairKey].push({
     sender,
-    senderName: senderName || 'Anonymous',
-    text: text.trim(),
+    senderName,
+    text,
     time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  };
+  });
 
-  state.chats[key].messages.push(msg);
-  saveData(state);
-  res.json({ success: true, message: msg });
+  saveData(data);
+  res.json({ success: true });
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`The Circle server running on port ${PORT}`);
+});
