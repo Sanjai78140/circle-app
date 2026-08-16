@@ -9,16 +9,56 @@ let dynamicRegionalQuestions = [];
 let screen = 'loading';
 let pollTimer = null;
 let heartbeatTimer = null;
+let titleFlashTimer = null;
 let errMsg = '';
 let draft = { name: '', dob: '', gender: '', userState: 'Tamil Nadu' };
+let notificationSent = false;
 
 function generateId() {
   return 'CIRC_' + Math.random().toString(36).substring(2, 7).toUpperCase();
 }
 
-// ---------- 3-SET QUESTION ARCHITECTURE ----------
+// ---------- NOTIFICATION SYSTEM ----------
+function requestNotificationPermission() {
+  if ('Notification' in window) {
+    Notification.requestPermission().then(permission => {
+      if (permission === 'granted') {
+        alert('🔔 Notifications enabled! We will ping you the second your partner is ready.');
+        renderLobby();
+      }
+    });
+  }
+}
 
-// SET 1: Full about the User (Self & Complexion/Style)
+function notifyUserMatchFound(partnerName, score) {
+  if (notificationSent) return;
+  notificationSent = true;
+
+  // 1. Desktop / System Web Notification
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification('✨ Match Found in The Circle!', {
+      body: `Your potential life partner (${score}% Match) is waiting! Click to enter your 2-min chat.`,
+      icon: 'https://fav.farm/💍',
+      tag: 'circle-match'
+    });
+  }
+
+  // 2. Tab Flashing for Background Users
+  let flash = false;
+  if (titleFlashTimer) clearInterval(titleFlashTimer);
+  titleFlashTimer = setInterval(() => {
+    document.title = flash ? '🔔 MATCH READY! CLICK HERE' : '✨ Life Partner Found!';
+    flash = !flash;
+  }, 1000);
+
+  // Clear title flash on click
+  window.addEventListener('focus', () => {
+    if (titleFlashTimer) clearInterval(titleFlashTimer);
+    document.title = 'The Circle';
+  }, { once: true });
+}
+
+// ---------- 3-SET QUESTION ARCHITECTURE ----------
 const SET_1_QUESTIONS = [
   {
     key: 'myLook',
@@ -46,7 +86,6 @@ const SET_1_QUESTIONS = [
   }
 ];
 
-// SET 2: What They Expect From Partner
 const SET_2_QUESTIONS = [
   {
     key: 'partnerLook',
@@ -74,7 +113,6 @@ const SET_2_QUESTIONS = [
   }
 ];
 
-// SET 3: How They Behaviorally Act & Trust-Building Deep Questions
 const SET_3_QUESTIONS = [
   {
     key: 'conflictStyle',
@@ -156,12 +194,12 @@ function renderOnboarding() {
     <div class="card">
       <div class="save-id-box">
         🔑 <strong>Your Resume ID: <span style="color:var(--gold);">${myId}</span></strong>
-        <div style="font-size:11.5px; margin-top:3px; color:var(--muted);">Save this ID to re-login on any tab/device and check matched results!</div>
+        <div style="font-size:11.5px; margin-top:3px; color:var(--muted);">Save this ID to re-login on any device and retrieve your match!</div>
       </div>
 
       <div class="honest-banner">
         ✨ <strong>Trust the Process</strong><br>
-        Answer genuinely across all 3 question sets. Let's see the magic happen!
+        Answer genuinely across all 3 question sets. Don't worry about waiting—we'll notify you when your match is locked!
       </div>
 
       <label class="field-label">Your Name or Nickname</label>
@@ -333,10 +371,28 @@ async function renderLobby() {
       return;
     }
 
+    const hasNotif = 'Notification' in window && Notification.permission === 'granted';
+
     app.innerHTML = `
       <div class="card">
         <div class="save-id-box" style="margin-bottom:14px;">
           🔑 Resume ID: <strong>${myId}</strong>
+        </div>
+
+        <div style="background:rgba(217,180,106,0.12); border:1px solid var(--gold); border-radius:12px; padding:12px 14px; margin-bottom:16px; text-align:left;">
+          <div style="font-weight:600; font-size:13.5px; color:var(--gold-soft); margin-bottom:4px;">
+            🔔 Don't Miss Your Life Partner Chat!
+          </div>
+          <div style="font-size:12px; color:var(--muted); line-height:1.4; margin-bottom:8px;">
+            No need to wait staring at the screen. Enable notifications and you can safely switch tabs or close your phone. We won't spam you—only ping you the exact moment your match is revealed!
+          </div>
+          ${!hasNotif ? `
+            <button class="btn btn-gold" style="padding:8px 14px; font-size:12px; width:auto;" onclick="requestNotificationPermission()">
+              Enable Match Notifications 🔔
+            </button>
+          ` : `
+            <span style="font-size:11.5px; color:#6bc992;">✅ Notifications active! You can safely leave this tab open in the background.</span>
+          `}
         </div>
 
         <div class="eyebrow">Round ${state.round} • Synchronized Lobby</div>
@@ -383,6 +439,9 @@ async function renderChat() {
     `;
     return;
   }
+
+  // Trigger Notification when user enters Chat
+  notifyUserMatchFound(myPair.astroTitle, myPair.score);
 
   app.innerHTML = `
     <div class="card">
