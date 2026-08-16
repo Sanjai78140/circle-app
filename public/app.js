@@ -1,617 +1,463 @@
 const app = document.getElementById('app');
-let myId = localStorage.getItem('circleMemberId') || null;
+
+// User State Persistence
+let myId = localStorage.getItem('circleMemberId') || generateId();
+localStorage.setItem('circleMemberId', myId);
+
 let quizAnswers = {};
 let quizIndex = 0;
+let quizSet = 1; // 1 = Self & Looks, 2 = Partner Preferences & Intentions
+let dynamicRegionalQuestions = [];
 let screen = 'loading';
 let pollTimer = null;
-let chatTimerInt = null;
+let heartbeatTimer = null;
 let errMsg = '';
-let draft = { name: '', age: '', dob: '', gender: '' };
+let draft = { name: '', dob: '', gender: '', userState: 'Tamil Nadu' };
 
-const DIMS = ['social', 'planning', 'love', 'conflict', 'family', 'adventure', 'trust', 'independence', 'humor'];
-
-const SIGN_GLYPH = { Aries:'♈', Taurus:'♉', Gemini:'♊', Cancer:'♋', Leo:'♌', Virgo:'♍', Libra:'♎', Scorpio:'♏', Sagittarius:'♐', Capricorn:'♑', Aquarius:'♒', Pisces:'♓' };
-const SIGN_ELEMENT = { Aries:'Fire', Leo:'Fire', Sagittarius:'Fire', Taurus:'Earth', Virgo:'Earth', Capricorn:'Earth', Gemini:'Air', Libra:'Air', Aquarius:'Air', Cancer:'Water', Scorpio:'Water', Pisces:'Water' };
-const SIGN_BLURB = {
-  Aries: "First to jump in, first to say what they're thinking. You bring the spark the circle needs.",
-  Taurus: "Steady, warm, a little stubborn in the best way. People trust you almost instantly.",
-  Gemini: "Quick wit, quicker questions. You keep conversations from ever going flat.",
-  Cancer: "You feel a room before you speak in it. Loyal once someone's earned it.",
-  Leo: "Bold, warm, made for center stage — but you make sure everyone else shines too.",
-  Virgo: "You notice the details nobody else does, and somehow that's exactly what people need.",
-  Libra: "Natural peacemaker with real taste. You make people feel chosen.",
-  Scorpio: "Intense in the quiet way. Once you're in, you're all the way in.",
-  Sagittarius: "Restless in a good way — always chasing the next real thing.",
-  Capricorn: "Ambitious, a little guarded at first, deeply loyal once the walls come down.",
-  Aquarius: "You love people in your own unconventional way, and it works.",
-  Pisces: "Dreamer, feeler, the one who remembers what everyone else forgot."
-};
-
-// ---------- psychology-flavored scaled questions (-2 to +2) ----------
-const SCALE_Q = {
-  social: { emoji:'⚡', title: 'Friday night, no plans yet. What actually sounds good?', opts: ['A quiet night in, just me', 'One close friend, low-key', 'Depends on my mood', 'A small group, some energy', 'Wherever the biggest crowd is'] },
-  planning: { emoji:'🗓️', title: "It's Saturday morning. Do you already know what today looks like?", opts: ['Zero plan, I\'ll see where the day takes me', 'Loose idea, nothing fixed', 'A bit of both', 'I\'ve got a rough plan going', 'There\'s a list and I\'m following it'] },
-  love: { emoji:'💛', title: 'Someone you\'re into does something small and thoughtful. What lands hardest?', opts: ['They tell me exactly what they\'re thinking', 'They just handle something for me, no fuss', 'Honestly, either works', 'They clear their whole evening for me', 'They just sit close, no need to talk'] },
-  conflict: { emoji:'⚔️', title: 'You and your partner disagree about something real. What\'s your first move?', opts: ['I go quiet and need time', 'I need space before I can talk', 'I try to talk it through calmly', 'I bring it up right away', 'I want it resolved before we sleep on it'] },
-  family: { emoji:'🏠', title: 'How much say does your family have in your relationship choices?', opts: ['None — this is my call, always', 'A little, but I don\'t need approval', 'Somewhere in the middle', 'Their opinion genuinely matters to me', 'If they don\'t like it, that\'s a real problem'] },
-  adventure: { emoji:'🧭', title: 'A friend says "let\'s do something completely random this weekend." Your gut reaction?', opts: ['Hard pass, I like my routine', 'Maybe, depends what it is', 'Cautiously curious', 'I\'m already grabbing my shoes', 'I\'m the one who texted that first'] },
-  trust: { emoji:'🔑', title: 'How quickly do you usually let someone new in?', opts: ['Very slowly — trust is earned over a long time', 'Slowly, but I open up in stages', 'Depends entirely on the person', 'Fairly quickly if the vibe is right', 'I wear my heart on my sleeve, always have'] },
-  independence: { emoji:'🧍', title: 'Your ideal relationship, day to day, looks like...', opts: ['Mostly separate lives that intersect sometimes', 'Our own space, close check-ins', 'A healthy mix of together and apart', 'Doing most things together', 'Practically inseparable, and I love that'] },
-  humor: { emoji:'😂', title: 'Your humor, honestly, is...', opts: ['Dry and deadpan', 'A bit sarcastic, mostly harmless', 'Silly and a little chaotic', 'Warm, more "aww" than "lol"', 'Loud, physical, the whole room notices'] }
-};
-
-// ---------- self-attributes & choice questions ----------
-const CHOICE_Q = {
-  height: { emoji:'📏', title: 'Your height, roughly?', opts: ["Under 5'2\"", "5'2\"–5'5\"", "5'5\"–5'8\"", "5'8\"–5'11\"", "6'0\" and up"] },
-  build: { emoji:'🏋️', title: 'How would you describe your build?', opts: ['Slim', 'Athletic', 'Average', 'Muscular', 'Curvy / plus-size'] },
-  hairStyle: { emoji:'💇', title: 'Your hair, most days?', opts: ['Short', 'Long', 'Curly', 'Bald / shaved', 'Colored / dyed'] },
-  complexion: { emoji:'🎨', title: 'How would you describe your complexion?', opts: ['Fair', 'Light', 'Medium', 'Tan', 'Deep'] },
-  selfCharacter: { emoji:'🎭', title: 'If a friend described your core personality in one line, it\'d be...', opts: ['Funny & lighthearted', 'Calm & grounded', 'Ambitious & driven', 'Deep & intense', 'Adventurous & spontaneous'] },
-  smoking: { emoji:'🚬', title: 'Do you smoke?', opts: ['Never', 'Socially', 'Regularly'] },
-  smokingFollow: { emoji:'🚬', title: 'The social cigarette — is it a "one at 2am with drinks" thing, or a real habit hiding behind the word "social"?', opts: ['Truly rare, barely counts', 'Basically every weekend', 'More than I\'d admit on a first date'] },
-  drinking: { emoji:'🍷', title: 'Do you drink?', opts: ['Never', 'Socially', 'Regularly'] },
-  drinkingFollow: { emoji:'🍷', title: 'What\'s the actual vibe — a glass of wine with dinner, or the last one standing on the dance floor?', opts: ['One drink, done, home by 10', 'A few on the weekend, nothing wild', 'I have been the last one standing, yes'] },
-  diet: { emoji:'🍽️', title: 'How would you describe your diet?', opts: ['Omnivore', 'Vegetarian', 'Vegan', 'Pescatarian', 'Other'] },
-  goal: { emoji:'🎯', title: "Be honest — what are you actually here for?", opts: ['Long-term relationship', 'Marriage-minded', 'Something casual first', 'Not sure yet, figuring it out'] },
-  vibeElement: { emoji:'✨', title: 'Forget your sun sign for a second — which element feels most like you?', opts: ['🔥 Fire — bold, fast, all in', '🌍 Earth — grounded, steady, dependable', '💨 Air — curious, social, always talking', '🌊 Water — deep, intuitive, feels everything'] },
-  partnerVibe: { emoji:'🎬', title: 'Picture it: rough day, you walk in the door and you\'re one comment away from crying or yelling. What do you actually need your partner to do?', opts: ['Say nothing, just hug me and let me decompress', 'Ask what happened and actually listen, no fixing', 'Make me laugh until I forget why I was upset', 'Give me 20 minutes alone, then check in', 'Jump straight into solving it with me'] },
-  // preferences — what they're drawn to in a partner
-  prefHeight: { emoji:'📐', title: 'Any height you\'re usually drawn to in a partner?', opts: ["Under 5'2\"", "5'2\"–5'5\"", "5'5\"–5'8\"", "5'8\"–5'11\"", "6'0\" and up", 'No preference'] },
-  prefBuild: { emoji:'💪', title: 'Any build you\'re usually drawn to?', opts: ['Slim', 'Athletic', 'Average', 'Muscular', 'Curvy / plus-size', 'No preference'] },
-  prefCharacter: { emoji:'🎯', title: 'What kind of personality pulls you in most?', opts: ['Funny & lighthearted', 'Calm & grounded', 'Ambitious & driven', 'Deep & intense', 'Adventurous & spontaneous', 'No preference'] },
-  prefHairStyle: { emoji:'💇', title: 'Any hair style you\'re usually drawn to?', opts: ['Short', 'Long', 'Curly', 'Bald / shaved', 'Colored / dyed', 'No preference'] }
-};
-const VIBE_VALUE = ['Fire', 'Earth', 'Air', 'Water'];
-
-function getSteps(ans) {
-  let steps = ['partnerVibe', ...DIMS, 'vibeElement', 'selfCharacter', 'height', 'build', 'hairStyle', 'complexion', 'smoking'];
-  if (ans.smoking === 'Socially') steps.push('smokingFollow');
-  steps.push('drinking');
-  if (ans.drinking === 'Socially') steps.push('drinkingFollow');
-  steps.push('diet', 'goal', 'prefsIntro', 'prefHeight', 'prefBuild', 'prefHairStyle', 'prefCharacter', 'aiFollowup', 'idealPartner');
-  return steps;
+function generateId() {
+  return 'CIRC_' + Math.random().toString(36).substring(2, 7).toUpperCase();
 }
 
-function esc(s) { return (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-// JSON.stringify leaves raw apostrophes in the string, which breaks a
-// single-quoted HTML attribute (e.g. options like "5'2\"" in the height
-// question). This produces a JSON literal that's also safe to embed inside
-// onclick='...'.
-function attrJson(value) { return JSON.stringify(value).replace(/'/g, '&#39;'); }
-function render(html) { app.innerHTML = html; }
+// ---------------- QUIZ QUESTION SETS ----------------
 
-async function api(path, opts) {
-  const res = await fetch('/api' + path, opts);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'Something went wrong.');
-  return data;
-}
-
-// ---------- boot ----------
-async function init() {
-  stopPolling();
-  const state = await api('/state');
-  if (state.locked) {
-    screen = 'results';
-    renderResults(state);
-    return;
+// SET 1: Self Taste, Looks & Regional Identity
+const SET_1_QUESTIONS = [
+  {
+    key: 'myLook',
+    emoji: '✨',
+    title: 'Set 1: Express Your Aesthetic & Style',
+    question: 'How would you best describe your personal look and style?',
+    opts: [
+      'Minimalistic, neat & comfortable modern wear.',
+      'Traditional, elegant & classic cultural outfits.',
+      'Trendy, bold, stylish & street fashion.',
+      'Casual, cozy & effortless everyday look.'
+    ]
+  },
+  {
+    key: 'selfVibe',
+    emoji: '⚡',
+    title: 'Set 1: Your Natural Vibe',
+    question: 'How do people usually perceive your energy when they meet you?',
+    opts: [
+      'Warm, gentle & soft-spoken listener.',
+      'Energetic, witty, funny & talkative.',
+      'Calm, grounded, intelligent & observant.',
+      'Bold, passionate, direct & spontaneous.'
+    ]
   }
+];
+
+// SET 2: Partner Preferences & Deep Intentions
+const SET_2_QUESTIONS = [
+  {
+    key: 'partnerLook',
+    emoji: '👁️',
+    title: 'Set 2: What Catches Your Eye in a Partner?',
+    question: 'What visual style or vibe do you admire most in a partner?',
+    opts: [
+      'Simple, clean-cut, genuine & subtle presentation.',
+      'Traditional charm, expressive eyes & cultural touch.',
+      'Stylish confidence, sharp dressing & strong posture.',
+      'Relaxed, cozy, approachable & friendly vibe.'
+    ]
+  },
+  {
+    key: 'intention',
+    emoji: '💍',
+    title: 'Set 2: Deep Intention & Goals',
+    question: 'Be honest—what are you looking to build through this connection?',
+    opts: [
+      'A deep, long-term romantic relationship leading to marriage.',
+      'A meaningful connection to see where chemistry takes us.',
+      'A best-friend-first relationship built on trust and laughs.',
+      'Companionship with someone who shares my core values.'
+    ]
+  },
+  {
+    key: 'conflictStyle',
+    emoji: '🕊️',
+    title: 'Set 2: Emotional Maturity & Conflict',
+    question: 'When a misunderstanding happens, what is your approach to healing it?',
+    opts: [
+      'Talk it out immediately with calm honesty.',
+      'Take a short quiet pause, then come together to resolve it.',
+      'Use light humor & a gentle hug to ease tension first.',
+      'Write down thoughts to communicate without emotion.'
+    ]
+  }
+];
+
+// ---------------- HELPER FUNCTIONS ----------------
+function esc(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function api(path, options = {}) {
+  const res = await fetch('/api' + path, options);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Server error');
+  }
+  return res.json();
+}
+
+function sendHeartbeat() {
   if (myId) {
-    const mem = state.members.find(m => m.id === myId);
-    if (mem) {
-      if (mem.status === 'complete') { screen = 'lobby'; renderLobby(); return; }
-      else { quizAnswers = {}; quizIndex = 0; screen = 'quiz'; renderQuiz(); return; }
-    } else {
-      localStorage.removeItem('circleMemberId');
-      myId = null;
-    }
+    api('/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memberId: myId })
+    }).catch(() => {});
   }
-  screen = 'landing';
-  renderLanding(state);
 }
 
-function renderLanding(state) {
-  render(`
-    <div class="eyebrow">Round ${state.round}</div>
-    <h1>The Circle</h1>
-    <p class="sub">${state.circleSize || 6} people, one round. Answer honestly, wait for the circle to fill, and reveal locks in your matches for good — this round, anyway.</p>
-    <p class="note" style="margin-top:-16px;margin-bottom:20px;">For fun — a compatibility quiz, not a clinical or psychological assessment.</p>
-    <div class="card">
-      ${errMsg ? `<div class="err">${esc(errMsg)}</div>` : ''}
-      <button class="btn btn-gold" onclick="startJoin()">Join this round</button>
-      <div style="height:10px"></div>
-      <label class="field-label">Already joined on another device? Enter your code</label>
-      <input id="resumeCode" placeholder="e.g. QK3F9M" style="text-transform:uppercase" maxlength="6">
-      <button class="btn btn-ghost" onclick="resume()">Resume</button>
-    </div>
-    <div class="note">${state.members.length}/${state.circleSize || 6} in the circle right now.</div>
-  `);
+// ---------------- RENDER VIEWS ----------------
+function render() {
+  if (screen === 'loading') renderLoading();
+  else if (screen === 'onboarding') renderOnboarding();
+  else if (screen === 'quiz') renderQuiz();
+  else if (screen === 'lobby') renderLobby();
+  else if (screen === 'chat') renderChat();
 }
 
-async function startJoin() {
-  errMsg = '';
-  const state = await api('/state');
-  if (state.locked) { screen = 'results'; renderResults(state); return; }
-  if (state.members.length >= (state.circleSize || 6)) { errMsg = 'This round is full. Wait for it to loop.'; renderLanding(state); return; }
-  screen = 'onboarding';
-  renderOnboarding();
-}
-
-async function resume() {
-  const code = document.getElementById('resumeCode').value.trim().toUpperCase();
-  const state = await api('/state');
-  const mem = state.members.find(m => m.id === code);
-  if (!mem) { errMsg = 'Code not found in this round.'; renderLanding(state); return; }
-  myId = mem.id;
-  localStorage.setItem('circleMemberId', myId);
-  if (state.locked) { screen = 'results'; renderResults(state); return; }
-  if (mem.status === 'complete') { screen = 'lobby'; renderLobby(); }
-  else { quizAnswers = {}; quizIndex = 0; screen = 'quiz'; renderQuiz(); }
+function renderLoading() {
+  app.innerHTML = `<div class="card"><div class="sub">Connecting to The Circle...</div></div>`;
 }
 
 function renderOnboarding() {
-  render(`
-    <div class="eyebrow">Step 1</div>
-    <h1>Who's joining?</h1>
-    <p class="sub">Just the basics — this builds your profile and calculates your sun sign.</p>
+  app.innerHTML = `
     <div class="card">
-      ${errMsg ? `<div class="err">${esc(errMsg)}</div>` : ''}
-      <label class="field-label">Name</label>
-      <input id="f_name" value="${esc(draft.name)}" placeholder="Your name">
-      <label class="field-label">Age</label>
-      <input id="f_age" type="number" min="18" value="${draft.age}" placeholder="18+">
-      <label class="field-label">Date of birth</label>
-      <input id="f_dob" type="date" value="${draft.dob}">
-      <label class="field-label">Gender</label>
+      <div class="save-id-box">
+        🔑 <strong>Your Resume ID: <span style="color:var(--gold);">${myId}</span></strong>
+        <div style="font-size:11.5px; margin-top:3px; color:var(--muted);">Save this ID! You can re-enter anytime to check who matched with you.</div>
+      </div>
+
+      <div class="honest-banner">
+        ✨ <strong>Welcome to The Circle</strong><br>
+        Please be genuine and answer honestly—let's see the magic happen!
+      </div>
+
+      <label class="field-label">Your Name or Nickname</label>
+      <input type="text" id="inName" value="${esc(draft.name)}" placeholder="e.g. Rahul / Ananya">
+
+      <label class="field-label">Date of Birth (Calculates Sun Sign)</label>
+      <input type="date" id="inDob" value="${esc(draft.dob)}">
+
+      <label class="field-label">Where are you from? (State / Region)</label>
+      <select id="inState">
+        <option value="Tamil Nadu" ${draft.userState==='Tamil Nadu'?'selected':''}>Tamil Nadu (Tanglish Scenarios)</option>
+        <option value="Karnataka" ${draft.userState==='Karnataka'?'selected':''}>Karnataka</option>
+        <option value="Kerala" ${draft.userState==='Kerala'?'selected':''}>Kerala</option>
+        <option value="Maharashtra" ${draft.userState==='Maharashtra'?'selected':''}>Maharashtra</option>
+        <option value="Delhi / North India" ${draft.userState==='Delhi / North India'?'selected':''}>Delhi / North India (Hinglish Scenarios)</option>
+        <option value="Other / International" ${draft.userState==='Other / International'?'selected':''}>Other / International</option>
+      </select>
+
+      <label class="field-label">I identify as...</label>
       <div class="gender-row">
-        <div class="gender-opt ${draft.gender === 'Woman' ? 'sel' : ''}" onclick="setGender('Woman')">Woman</div>
-        <div class="gender-opt ${draft.gender === 'Man' ? 'sel' : ''}" onclick="setGender('Man')">Man</div>
+        <div class="gender-opt ${draft.gender === 'woman' ? 'sel' : ''}" onclick="selectGender('woman')">Woman</div>
+        <div class="gender-opt ${draft.gender === 'man' ? 'sel' : ''}" onclick="selectGender('man')">Man</div>
       </div>
-      <button class="btn btn-gold" onclick="submitOnboarding()">Continue to quiz</button>
+
+      ${errMsg ? `<div class="err">${esc(errMsg)}</div>` : ''}
+
+      <button class="btn btn-gold" onclick="startQuizSet1()">Start Set 1: My Style & Vibe ✨</button>
+      
+      <div style="margin-top:16px; text-align:center;">
+        <span style="font-size:12px; color:var(--muted); cursor:pointer; text-decoration:underline;" onclick="resumeSession()">Already joined? Check my match status</span>
+      </div>
     </div>
-  `);
+  `;
 }
-function setGender(g) { draft.gender = g; renderOnboarding(); }
 
-async function submitOnboarding() {
-  draft.name = document.getElementById('f_name').value.trim();
-  draft.age = document.getElementById('f_age').value;
-  draft.dob = document.getElementById('f_dob').value;
-  if (!draft.name || !draft.age || !draft.dob || !draft.gender) { errMsg = 'Fill in every field.'; renderOnboarding(); return; }
-  if (parseInt(draft.age) < 18) { errMsg = 'Must be 18 or older.'; renderOnboarding(); return; }
+function selectGender(g) {
+  draft.gender = g;
+  draft.name = document.getElementById('inName').value;
+  draft.dob = document.getElementById('inDob').value;
+  draft.userState = document.getElementById('inState').value;
+  render();
+}
 
-  try {
-    const res = await api('/join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft) });
-    myId = res.id;
-    localStorage.setItem('circleMemberId', myId);
-    quizAnswers = {}; quizIndex = 0;
-    renderSignReveal(res.sunSign, res.id);
-  } catch (e) {
-    errMsg = e.message; renderOnboarding();
+async function startQuizSet1() {
+  draft.name = document.getElementById('inName').value.trim();
+  draft.dob = document.getElementById('inDob').value;
+  draft.userState = document.getElementById('inState').value;
+
+  if (!draft.name || !draft.dob || !draft.gender) {
+    errMsg = 'Please fill in your name, birthday, and gender.';
+    render();
+    return;
   }
-}
 
-function renderSignReveal(sign, code) {
-  const glyph = SIGN_GLYPH[sign] || '✦';
-  const element = SIGN_ELEMENT[sign] || '';
-  const blurb = SIGN_BLURB[sign] || '';
-  const stars = [
-    { top: '4%', left: '50%' }, { top: '20%', left: '88%' }, { top: '50%', left: '96%' },
-    { top: '80%', left: '85%' }, { top: '96%', left: '50%' }, { top: '80%', left: '15%' },
-    { top: '50%', left: '4%' }, { top: '20%', left: '12%' }
-  ];
-  render(`
-    <div class="eyebrow">Your chart says...</div>
-    <h1>Reading the stars</h1>
-    <div class="card sign-reveal">
-      <div class="sign-orbit">
-        ${stars.map((s,i)=>`<span class="star" style="top:${s.top};left:${s.left};animation-delay:${(i*0.25).toFixed(2)}s">✦</span>`).join('')}
-        <div class="sign-glyph">${glyph}</div>
-      </div>
-      <div class="sign-name">${esc(sign)}</div>
-      <div class="sign-element">${esc(element)} sign</div>
-      <div class="sign-blurb">${esc(blurb)}</div>
-    </div>
-    <div class="code-box">${esc(code)}</div>
-    <p class="note" style="margin-top:0;">That's your code — this device will auto-resume, but save it in case you switch devices.</p>
-    <button class="btn btn-gold" onclick="renderQuiz()">Start the quiz</button>
-  `);
-}
+  errMsg = '';
+  screen = 'loading';
+  render();
 
-function sectionLabel(key) {
-  if (key === 'partnerVibe') return 'THE SCENARIO';
-  if (DIMS.includes(key)) return 'MINDSET';
-  if (['height','build','hairStyle','complexion','selfCharacter'].includes(key)) return 'ABOUT YOU';
-  if (['prefHeight','prefBuild','prefCharacter'].includes(key)) return 'WHAT YOU\'RE DRAWN TO';
-  return 'LIFESTYLE';
+  // Fetch AI Dynamic Regional Questions based on State
+  try {
+    const aiRes = await api('/ai-questions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userState: draft.userState })
+    });
+    dynamicRegionalQuestions = aiRes.questions || [];
+  } catch (e) {
+    dynamicRegionalQuestions = [];
+  }
+
+  quizSet = 1;
+  quizIndex = 0;
+  quizAnswers = {};
+  screen = 'quiz';
+  render();
 }
 
 function renderQuiz() {
-  const steps = getSteps(quizAnswers);
-  if (quizIndex >= steps.length) { finalizeQuiz(); return; }
-  const key = steps[quizIndex];
-  if (key === 'aiFollowup') { renderAiFollowup(steps); return; }
-  if (key === 'prefsIntro') {
-    const pct = Math.round((quizIndex / steps.length) * 100);
-    render(`
-      <div class="progress"><div class="progress-fill" style="width:${pct}%"></div></div>
-      <div class="chapter-card q-anim">
-        <div class="chapter-ico">💭</div>
-        <div class="eyebrow">Chapter two</div>
-        <h1 style="font-size:24px;">That's you covered. Now — what are you drawn to in a partner?</h1>
-        <p class="sub" style="margin-bottom:0;">Same four questions, flipped: instead of describing yourself, you're describing what pulls you in.</p>
-        <button class="btn btn-gold" style="margin-top:18px;" onclick="quizIndex++; renderQuiz();">Continue</button>
+  const currentQuestions = getCombinedQuestions();
+  const q = currentQuestions[quizIndex];
+  const totalQ = currentQuestions.length;
+  const progress = Math.round(((quizIndex + 1) / totalQ) * 100);
+
+  app.innerHTML = `
+    <div class="card">
+      <div class="eyebrow">${q.emoji} Question ${quizIndex + 1} of ${totalQ}</div>
+      <div class="squad-bar-track" style="margin-bottom:18px;">
+        <div class="squad-bar-fill" style="width:${progress}%; background:var(--gold);"></div>
       </div>
-    `);
-    return;
-  }
-  const def = SCALE_Q[key] || CHOICE_Q[key];
-  const pct = Math.round((quizIndex / steps.length) * 100);
 
-  if (key === 'idealPartner') {
-    render(`
-      <div class="progress"><div class="progress-fill" style="width:${pct}%"></div></div>
-      <div class="eyebrow">Last one 💬</div>
-      <h1 class="q-anim" style="font-size:26px;">In a sentence or two, describe your ideal partner.</h1>
-      <div class="card q-anim">
-        <textarea id="f_ideal" placeholder="What matters most to you..."></textarea>
-        <button class="btn btn-gold" onclick="answerIdeal()">Finish quiz</button>
+      <h2>${esc(q.title)}</h2>
+      <p class="sub">${esc(q.question)}</p>
+
+      <div class="q-options">
+        ${q.opts.map(opt => `
+          <div class="q-opt" onclick="answerQuestion('${q.key}', '${esc(opt)}')">
+            ${esc(opt)}
+          </div>
+        `).join('')}
       </div>
-    `);
-    return;
-  }
-
-  render(`
-    <div class="progress"><div class="progress-fill" style="width:${pct}%"></div></div>
-    <div class="q-timer-track"><div class="q-timer-fill" style="animation-name:shrinkBar;"></div></div>
-    <div class="eyebrow">${sectionLabel(key)} · Question ${quizIndex + 1} of ${steps.length}</div>
-    <h1 class="q-anim" style="font-size:24px;">${def.emoji ? def.emoji + ' ' : ''}${esc(def.title)}</h1>
-    <div class="q-options q-anim">
-      ${def.opts.map((o, i) => `<div class="q-opt" onclick='answerQuiz(${attrJson(key)}, ${SCALE_Q[key] ? i - 2 : attrJson(key === 'vibeElement' ? VIBE_VALUE[i] : o)})'>${esc(o)}</div>`).join('')}
     </div>
-  `);
+  `;
 }
-function answerQuiz(key, value) { quizAnswers[key] = value; quizIndex++; renderQuiz(); }
-function answerIdeal() { quizAnswers.idealPartner = document.getElementById('f_ideal').value.trim(); quizIndex++; finalizeQuiz(); }
 
-async function renderAiFollowup(steps) {
-  const pct = Math.round((quizIndex / steps.length) * 100);
-  render(`
-    <div class="progress"><div class="progress-fill" style="width:${pct}%"></div></div>
-    <div class="eyebrow">One more, just for you 🧠</div>
-    <h1 class="q-anim" style="font-size:24px;">Reading your answers...</h1>
-    <div class="q-anim note" style="text-align:center;padding:30px 0;">Thinking of a good follow-up question...</div>
-  `);
-  let q = null;
-  try {
-    q = await api('/ai-question', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answers: quizAnswers }) });
-  } catch (e) { q = null; }
-  if (quizIndex >= getSteps(quizAnswers).length || getSteps(quizAnswers)[quizIndex] !== 'aiFollowup') return; // user navigated away
-  if (!q || q.available === false) {
-    // no AI configured, or it failed — skip forward invisibly, no error shown
-    quizIndex++;
-    renderQuiz();
-    return;
-  }
-  quizAnswers._aiTitle = q.title;
-  render(`
-    <div class="progress"><div class="progress-fill" style="width:${pct}%"></div></div>
-    <div class="eyebrow">One more, just for you 🧠</div>
-    <h1 class="q-anim" style="font-size:24px;">${esc(q.title)}</h1>
-    <div class="q-options q-anim">
-      ${q.options.map(o => `<div class="q-opt" onclick='answerAiFollowup(${attrJson(o)})'>${esc(o)}</div>`).join('')}
-    </div>
-  `);
+function getCombinedQuestions() {
+  return [...SET_1_QUESTIONS, ...dynamicRegionalQuestions, ...SET_2_QUESTIONS];
 }
-function answerAiFollowup(value) {
-  quizAnswers.aiFollowupQuestion = quizAnswers._aiTitle || '';
-  quizAnswers.aiFollowupAnswer = value;
+
+async function answerQuestion(key, val) {
+  quizAnswers[key] = val;
   quizIndex++;
-  renderQuiz();
-}
 
-async function finalizeQuiz() {
-  try {
-    await api('/quiz', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: myId, answers: quizAnswers }) });
-    screen = 'lobby';
-    renderLobby();
-    startPolling();
-  } catch (e) {
-    errMsg = e.message;
-    screen = 'landing';
-    const state = await api('/state');
-    renderLanding(state);
+  const allQ = getCombinedQuestions();
+  if (quizIndex < allQ.length) {
+    render();
+  } else {
+    // Complete Registration
+    screen = 'loading';
+    render();
+    try {
+      const res = await api('/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: myId,
+          name: draft.name,
+          dob: draft.dob,
+          gender: draft.gender,
+          userState: draft.userState,
+          answers: quizAnswers
+        })
+      });
+      screen = 'lobby';
+      startPolling();
+    } catch (e) {
+      errMsg = e.message;
+      screen = 'onboarding';
+      render();
+    }
   }
 }
 
-// ---------- lobby (PUBG-style waiting room) ----------
-function slotGrid(members, size) {
-  const cols = size <= 6 ? 3 : 5;
-  let html = `<div class="slot-grid" style="grid-template-columns:repeat(${cols},1fr)">`;
-  for (let i = 0; i < size; i++) {
-    const mem = members[i];
-    if (!mem) { html += `<div class="slot"><div class="glyph" style="opacity:0.25">?</div><div class="nm" style="opacity:0.3">open</div></div>`; continue; }
-    const isW = mem.gender === 'Woman';
-    const ready = mem.status === 'complete';
-    html += `<div class="slot ${ready ? (isW ? 'filled-w' : 'filled-m') : 'pending'} ${mem.id === myId ? 'is-me' : ''}">
-      <div class="glyph">${ready ? (isW ? '♀' : '♂') : '…'}</div>
-      <div class="nm">${esc(mem.name.split(' ')[0])}${mem.id === myId ? ' (you)' : ''}</div>
-    </div>`;
+async function resumeSession() {
+  const enterId = prompt("Enter your saved Resume ID:", myId);
+  if (enterId) {
+    myId = enterId.trim();
+    localStorage.setItem('circleMemberId', myId);
+    screen = 'loading';
+    render();
+    try {
+      const state = await api('/state');
+      if (state.members.some(m => m.id === myId)) {
+        screen = state.locked ? 'chat' : 'lobby';
+        startPolling();
+      } else {
+        alert("ID not found in current round. You can join fresh!");
+        screen = 'onboarding';
+      }
+    } catch (e) {
+      screen = 'onboarding';
+    }
+    render();
   }
-  html += '</div>';
-  return html;
-}
-
-function genderBar(readyCount, joinedCount, label, cls, max) {
-  const readyPct = Math.min(100, (readyCount / max) * 100);
-  const joinedPct = Math.min(100, (joinedCount / max) * 100);
-  return `
-    <div class="squad-bar-row">
-      <div class="squad-bar-label"><span>${label}</span><span>${readyCount}/${max} ready · ${joinedCount}/${max} in</span></div>
-      <div class="squad-bar-track">
-        <div class="squad-bar-fill squad-bar-joined ${cls}" style="width:${joinedPct}%"></div>
-        <div class="squad-bar-fill squad-bar-ready ${cls}" style="width:${readyPct}%"></div>
-      </div>
-    </div>`;
 }
 
 async function renderLobby() {
-  const state = await api('/state');
-  if (state.locked) { stopPolling(); screen = 'results'; renderResults(state); return; }
+  try {
+    const state = await api('/state');
+    if (state.locked) {
+      screen = 'chat';
+      renderChat();
+      return;
+    }
 
-  const size = state.circleSize || 6;
-  const members = [...state.members].sort((a, b) => a.joinedAt - b.joinedAt);
-  const complete = members.filter(m => m.status === 'complete');
-  const total = members.length;
+    app.innerHTML = `
+      <div class="card">
+        <div class="save-id-box" style="margin-bottom:14px;">
+          🔑 Resume ID: <strong>${myId}</strong>
+        </div>
 
-  const women = members.filter(m => m.gender === 'Woman');
-  const men = members.filter(m => m.gender === 'Man');
-  const womenReady = women.filter(m => m.status === 'complete').length;
-  const menReady = men.filter(m => m.status === 'complete').length;
+        <div class="eyebrow">Round ${state.round} • Synchronized Lobby</div>
+        <h1>The Circle is Filling</h1>
+        <p class="sub">Once men and women join, pairings will trigger automatically.</p>
 
-  const latest = [...members].sort((a, b) => b.joinedAt - a.joinedAt)[0];
-  const ticker = latest ? `✨ ${esc(latest.name.split(' ')[0])} just dropped into the circle` : '';
+        <div style="margin:20px 0;">
+          <div class="squad-bar-row">
+            <div class="squad-bar-label"><span>Women Joined</span><span>${state.womenCount} / 5</span></div>
+            <div class="squad-bar-track"><div class="squad-bar-fill" style="width:${(state.womenCount/5)*100}%; background:var(--woman);"></div></div>
+          </div>
+          <div class="squad-bar-row">
+            <div class="squad-bar-label"><span>Men Joined</span><span>${state.menCount} / 5</span></div>
+            <div class="squad-bar-track"><div class="squad-bar-fill" style="width:${(state.menCount/5)*100}%; background:var(--man);"></div></div>
+          </div>
+        </div>
 
-  let banner = '';
-  if (total === size && complete.length === size && !state.deadlockAt) {
-    banner = `<div class="locking-banner pop">🔒 Lobby full — locking in matches<span class="dots"><span>.</span><span>.</span><span>.</span></span></div>`;
-  } else if (state.deadlockAt) {
-    banner = `<div class="locking-banner pop" style="border-color:var(--rose);color:var(--rose)">This round couldn't pair up (needs at least one woman and one man). Resetting shortly...</div>`;
+        <button class="btn btn-gold" onclick="triggerReveal()">Reveal Cosmic Matches ✨</button>
+      </div>
+    `;
+  } catch (e) {}
+}
+
+async function triggerReveal() {
+  try {
+    await api('/reveal', { method: 'POST' });
+    screen = 'chat';
+    render();
+  } catch (e) {
+    alert(e.message);
   }
-
-  render(`
-    <div class="match-eyebrow-row"><span class="pulse-dot"></span> MATCHMAKING · ROUND ${state.round}</div>
-    <h1 style="text-align:center;">Filling the circle</h1>
-    <p class="sub" style="text-align:center;">Auto-starts the second all ${size} seats are ready — no button to press.</p>
-    <div class="big-counter"><div class="n">${total}/${size}</div><div class="l">players joined</div></div>
-    <div class="ticker">${ticker}</div>
-    ${banner}
-    <div class="card">
-      ${genderBar(womenReady, women.length, '♀ Women', 'bar-w', size)}
-      ${genderBar(menReady, men.length, '♂ Men', 'bar-m', size)}
-      ${slotGrid(members, size)}
-      <div class="counts">
-        <div class="count-pill"><div class="n">${womenReady}</div><div class="l">Women ready</div></div>
-        <div class="count-pill"><div class="n">${menReady}</div><div class="l">Men ready</div></div>
-        <div class="count-pill"><div class="n">${complete.length}</div><div class="l">Total ready</div></div>
-      </div>
-    </div>
-    <div class="card rules-card">
-      <div class="eyebrow">How this round works</div>
-      <div class="rules-list">
-        <div class="rule-row"><span class="rule-ico">1</span><span>${size} seats total — the circle fills as people join and finish the quiz. You can see live who's in and who's still answering.</span></div>
-        <div class="rule-row"><span class="rule-ico">2</span><span>The moment all ${size} seats are ready, matching locks automatically — no button, no host, nothing for anyone to press.</span></div>
-        <div class="rule-row"><span class="rule-ico">3</span><span>Matching blends your answers, shared habits, sun-sign compatibility, and stated preferences to pair people up — best matches are locked first, so no one is double-matched.</span></div>
-        <div class="rule-row"><span class="rule-ico">4</span><span>Reveal shows you who you matched with, your compatibility %, and why you were paired — full board is visible to everyone, so it's transparent, not a black box.</span></div>
-        <div class="rule-row"><span class="rule-ico">⏱</span><span><b>Every matched pair gets a private 2-minute chat room</b>, timed from the moment reveal happens. It's just the two of you — no one else can see it.</span></div>
-        <div class="rule-row"><span class="rule-ico">↻</span><span>The instant that 2-minute window closes, the whole circle resets and ${size} fresh seats open for the next round — automatically, for everyone.</span></div>
-      </div>
-    </div>
-    <div class="link-row"><a onclick="leaveCircle()">Leave &amp; start over</a></div>
-  `);
 }
 
-async function leaveCircle() {
-  await api('/leave', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: myId }) });
-  localStorage.removeItem('circleMemberId');
-  myId = null;
-  stopPolling();
+async function renderChat() {
   const state = await api('/state');
-  screen = 'landing';
-  renderLanding(state);
-}
+  const myPair = state.pairs.find(p => p.womanId === myId || p.manId === myId);
 
-// ---------- results / chat ----------
-let tarotFlipped = false;
-
-async function renderResults(state) {
-  if (!state.locked) {
-    // circle already looped server-side
-    localStorage.removeItem('circleMemberId');
-    myId = null;
-    screen = 'landing';
-    renderLanding(state);
+  if (!myPair) {
+    app.innerHTML = `
+      <div class="card">
+        <h2>Circle Unmatched This Round</h2>
+        <p class="sub">The circle will auto-loop into the next round shortly!</p>
+      </div>
+    `;
     return;
   }
 
-  const myPair = state.pairs.find(p => p.womanId === myId || p.manId === myId);
-  const iAmUnmatched = state.unmatchedIds.includes(myId);
-
-  let personalBlock = '';
-  let partner = null;
-  if (myPair) {
-    const partnerName = myPair.womanId === myId ? myPair.manName : myPair.womanName;
-    const partnerId = myPair.womanId === myId ? myPair.manId : myPair.womanId;
-    try {
-      const detail = await api(`/pair-detail/${state.round}/${myPair.womanId}/${myPair.manId}`);
-      partner = myPair.womanId === myId ? detail.man : detail.woman;
-    } catch (e) { partner = null; }
-    personalBlock = `
-      <div class="tarot ${tarotFlipped ? 'flipped' : ''}" id="tarotEl" onclick="toggleTarot()">
-        <div class="tarot-inner">
-          <div class="tarot-face tarot-front">
-            <div class="glyph">✦</div>
-            <div style="font-family:'Fraunces',serif;font-size:18px;color:var(--gold-soft)">Your match</div>
-            <div class="note" style="margin-top:6px">tap to flip</div>
-          </div>
-          <div class="tarot-face tarot-back">
-            <div class="compat-num">${myPair.total}%</div>
-            <div class="compat-label">compatibility</div>
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="eyebrow">Matched with</div>
-        <h1 style="font-size:22px;">${esc(partnerName)}</h1>
-        <div style="margin-bottom:10px;">
-          <span class="badge">${esc(partner?.sunSign || '')} ${SIGN_GLYPH[partner?.sunSign] || ''}</span>
-          <span class="badge" style="margin-left:6px;">${esc(partner?.vibeElement || '')} energy</span>
-          ${partner?.selfCharacter ? `<span class="badge" style="margin-left:6px;">${esc(partner.selfCharacter)}</span>` : ''}
-        </div>
-        <div class="score-breakdown">
-          <div class="score-chip">Vibe fit <b>${myPair.behavior}%</b></div>
-          <div class="score-chip">Habits <b>${myPair.habits}%</b></div>
-          <div class="score-chip">Stars <b>${myPair.sun}%</b></div>
-          <div class="score-chip">Type match <b>${myPair.pref}%</b></div>
-        </div>
-        <div class="why-box">${esc(myPair.why)}</div>
-        ${partner?.aiFollowupAnswer ? `<div class="note" style="text-align:left;margin-top:10px;">Asked "${esc(partner.aiFollowupQuestion)}" — they said: <i>"${esc(partner.aiFollowupAnswer)}"</i></div>` : ''}
-      </div>
-      <div class="timer" id="chatTimer"></div>
-      <div class="chat-box" id="chatBox"></div>
-      <div class="chat-input-row">
-        <input id="chatInput" placeholder="Say hello...">
-        <button class="btn btn-gold" style="width:auto;padding:12px 18px" onclick="sendChat()">Send</button>
-      </div>
-    `;
-  } else if (myId && iAmUnmatched) {
-    personalBlock = `
-      <div class="card" style="text-align:center;">
-        <div style="font-size:32px;margin-bottom:8px;">☾</div>
-        <div class="why-box">No one scored high enough this round. Sometimes the circle just doesn't line up — worth another round.</div>
-      </div>
-    `;
-  } else if (!myId) {
-    personalBlock = `
-      <div class="card" style="text-align:center;">
-        <div class="why-box">Matches for this round are already locked. Enter your code on the home screen to see your personal result, or just watch the board below.</div>
-      </div>
-    `;
-  }
-
-  render(`
-    <div class="eyebrow">Round ${state.round} · Revealed</div>
-    <h1>Results</h1>
-    ${personalBlock}
+  app.innerHTML = `
     <div class="card">
-      <div class="eyebrow">All pairs, transparently</div>
-      <div class="pair-list">
-        ${state.pairs.map(p => `<div class="pair-row"><span><b>${esc(p.womanName)}</b> &amp; <b>${esc(p.manName)}</b></span><span>${p.total}%</span></div>`).join('') || '<div class="pair-row">No pairs formed this round.</div>'}
+      <div class="eyebrow">Cosmic Synergy • ${myPair.score}% Match</div>
+      <h2>${esc(myPair.astroTitle)}</h2>
+      <p class="sub" style="font-style:italic;">"${esc(myPair.why)}"</p>
+      
+      <div id="statusBanner" style="background:var(--surface-2); padding:10px 14px; border-radius:10px; font-size:13px; margin-bottom:14px; border:1px solid var(--line);">
+        Checking presence...
+      </div>
+
+      <div class="chat-box" id="chatBox" style="height:230px; overflow-y:auto; border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:12px;"></div>
+
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="chatInput" placeholder="Send a genuine message..." onkeypress="if(event.key==='Enter') sendChat('${myPair.womanId}', '${myPair.manId}')">
+        <button class="btn btn-gold" style="width:auto;" onclick="sendChat('${myPair.womanId}', '${myPair.manId}')">Send</button>
       </div>
     </div>
-    <div class="note">Circle loops automatically when the chat window closes — no need to do anything.</div>
-    <div class="link-row"><a onclick="hardReset()">Back to home</a></div>
-  `);
+  `;
 
-  if (myPair) {
-    tickChatTimer(state.lockedAt);
-    loadAndRenderChat(myPair.womanId, myPair.manId);
-  }
-  startPolling();
+  loadChat(myPair.womanId, myPair.manId);
 }
 
-function toggleTarot() {
-  tarotFlipped = !tarotFlipped;
-  const el = document.getElementById('tarotEl');
-  if (el) el.classList.toggle('flipped');
-  if (tarotFlipped) burstConfetti();
-}
-function burstConfetti() {
-  const el = document.getElementById('tarotEl');
-  if (!el) return;
-  const wrap = document.createElement('div');
-  wrap.style.position = 'absolute';
-  wrap.style.left = '50%';
-  wrap.style.top = '0';
-  wrap.style.width = '0'; wrap.style.height = '0';
-  const colors = ['#d9b46a', '#eecd8f', '#c96b6b', '#c96b8f'];
-  for (let i = 0; i < 14; i++) {
-    const dot = document.createElement('div');
-    dot.className = 'confetti-dot';
-    const angle = (i / 14) * Math.PI * 2;
-    const dist = 60 + Math.random() * 40;
-    dot.style.setProperty('--tx', Math.cos(angle) * dist + 'px');
-    dot.style.setProperty('--ty', Math.sin(angle) * dist + 'px');
-    dot.style.background = colors[i % colors.length];
-    wrap.appendChild(dot);
-  }
-  el.style.position = 'relative';
-  el.appendChild(wrap);
-  setTimeout(() => wrap.remove(), 1000);
-}
-
-function hardReset() {
-  localStorage.removeItem('circleMemberId');
-  myId = null;
-  window.location.reload();
-}
-
-function tickChatTimer(lockedAt) {
-  if (chatTimerInt) clearInterval(chatTimerInt);
-  const chatEnd = lockedAt + 2 * 60 * 1000;
-  const upd = () => {
-    const left = Math.max(0, Math.round((chatEnd - Date.now()) / 1000));
-    const el = document.getElementById('chatTimer');
-    if (el) el.textContent = left > 0 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} left to chat` : 'Chat closed — circle looping...';
-    if (left <= 0) clearInterval(chatTimerInt);
-  };
-  upd();
-  chatTimerInt = setInterval(upd, 1000);
-}
-
-async function loadAndRenderChat(womanId, manId) {
+async function loadChat(wId, mId) {
   try {
-    const data = await api(`/chat/${womanId}/${manId}`);
+    const res = await api(`/chat/${wId}/${mId}`);
+    const banner = document.getElementById('statusBanner');
+    
+    if (banner) {
+      if (!res.started) {
+        banner.innerHTML = `⏳ <strong>Waiting for partner to come online...</strong><br><span style="font-size:11.5px; color:var(--muted);">Timer will start automatically as soon as BOTH of you are in the chat room!</span>`;
+      } else {
+        banner.innerHTML = `🔥 <strong>Both Online! 2-Min Live Chat active: <span style="color:var(--gold);">${res.secsLeft}s remaining</span></strong>`;
+      }
+    }
+
     const box = document.getElementById('chatBox');
     if (!box) return;
-    box.innerHTML = data.messages.map(m => `
-      <div class="msg ${m.sender === myId ? 'mine' : ''}">
-        <div class="who">${esc(m.senderName)}</div>
-        <div class="bubble">${esc(m.text)}</div>
-      </div>`).join('') || '<div class="note">No messages yet.</div>';
+    box.innerHTML = res.messages.map(m => `
+      <div style="margin-bottom:8px; text-align:${m.sender === myId ? 'right' : 'left'};">
+        <span style="font-size:11px; color:var(--muted);">${esc(m.senderName)} • ${m.time}</span>
+        <div style="background:${m.sender === myId ? 'var(--gold)' : 'var(--surface-2)'}; color:${m.sender === myId ? '#1a1330' : 'var(--text)'}; display:inline-block; padding:8px 12px; border-radius:12px; max-width:80%; font-size:14px;">
+          ${esc(m.text)}
+        </div>
+      </div>
+    `).join('') || '<div style="color:var(--muted); font-size:13px;">No messages yet. Say hello! 👋</div>';
     box.scrollTop = box.scrollHeight;
-  } catch (e) { /* ignore */ }
+  } catch (e) {}
 }
 
-async function sendChat() {
+async function sendChat(wId, mId) {
   const input = document.getElementById('chatInput');
   const text = input.value.trim();
   if (!text) return;
-  const state = await api('/state');
-  const myPair = state.pairs.find(p => p.womanId === myId || p.manId === myId);
-  if (!myPair) return;
-  let myName = 'You';
-  try { const me = await api(`/me/${myId}`); myName = me.name || 'You'; } catch (e) { /* keep default */ }
   try {
-    await api(`/chat/${myPair.womanId}/${myPair.manId}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sender: myId, senderName: myName, text })
+    await api(`/chat/${wId}/${mId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sender: myId, senderName: draft.name || 'You', text })
     });
     input.value = '';
-    loadAndRenderChat(myPair.womanId, myPair.manId);
-  } catch (e) { /* chat window likely closed */ }
+    loadChat(wId, mId);
+  } catch (e) {}
 }
 
-// ---------- polling ----------
 function startPolling() {
   stopPolling();
-  const interval = screen === 'lobby' ? 2000 : 4000;
-  pollTimer = setInterval(async () => {
-    const state = await api('/state');
-    if (screen === 'lobby') renderLobby();
-    else if (screen === 'results') renderResults(state);
-  }, interval);
-}
-function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+  sendHeartbeat();
+  heartbeatTimer = setInterval(sendHeartbeat, 5000);
 
-init();
+  pollTimer = setInterval(() => {
+    if (screen === 'lobby') renderLobby();
+    if (screen === 'chat') {
+      api('/state').then(st => {
+        const myPair = st.pairs.find(p => p.womanId === myId || p.manId === myId);
+        if (myPair) loadChat(myPair.womanId, myPair.manId);
+      });
+    }
+  }, 2500);
+}
+
+function stopPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+}
+
+// Boot up
+(async function init() {
+  try {
+    const st = await api('/state');
+    if (myId && st.members.some(m => m.id === myId)) {
+      screen = st.locked ? 'chat' : 'lobby';
+      startPolling();
+    } else {
+      screen = 'onboarding';
+    }
+  } catch (e) {
+    screen = 'onboarding';
+  }
+  render();
+})();
