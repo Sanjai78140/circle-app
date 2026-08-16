@@ -34,16 +34,14 @@ function notifyUserMatchFound(partnerName, score) {
   if (notificationSent) return;
   notificationSent = true;
 
-  // 1. Desktop / System Web Notification
   if ('Notification' in window && Notification.permission === 'granted') {
     new Notification('✨ Match Found in The Circle!', {
-      body: `Your potential life partner (${score}% Match) is waiting! Click to enter your 2-min chat.`,
+      body: `Your potential life partner (${score}% Match) is waiting! Click to enter your 2-minute chat.`,
       icon: 'https://fav.farm/💍',
       tag: 'circle-match'
     });
   }
 
-  // 2. Tab Flashing for Background Users
   let flash = false;
   if (titleFlashTimer) clearInterval(titleFlashTimer);
   titleFlashTimer = setInterval(() => {
@@ -51,14 +49,13 @@ function notifyUserMatchFound(partnerName, score) {
     flash = !flash;
   }, 1000);
 
-  // Clear title flash on click
   window.addEventListener('focus', () => {
     if (titleFlashTimer) clearInterval(titleFlashTimer);
     document.title = 'The Circle';
   }, { once: true });
 }
 
-// ---------- 3-SET QUESTION ARCHITECTURE ----------
+// ---------- 4-SET QUESTION ARCHITECTURE ----------
 const SET_1_QUESTIONS = [
   {
     key: 'myLook',
@@ -152,6 +149,105 @@ const SET_3_QUESTIONS = [
   }
 ];
 
+const SET_4_TN_QUESTIONS = [
+  {
+    key: 'foodVibe',
+    emoji: '🍗',
+    title: 'SET 4: Ultimate Food Debate',
+    question: 'Weekend Night Out! Unagaluku edhu ultimate comfort food spot?',
+    opts: [
+      'Hot Dindigul / Thalappakatti Mutton Biryani with Seeraga Samba rice!',
+      'Crispy Parotta with Salna at 1 AM local street stall!',
+      'Peaceful Cafe burger & pasta with cozy aesthetics.',
+      'Simple Home-cooked Podi Dosa & Filter Coffee.'
+    ]
+  },
+  {
+    key: 'musicVibe',
+    emoji: '🎧',
+    title: 'SET 4: Music & Playlist Chemistry',
+    question: 'Car-la long drive pogum bodhu, playlist yarudhu play aaganum?',
+    opts: [
+      'Sai Abhyankarr / Anirudh — Modern upbeat tracks & trending songs.',
+      'A.R. Rahman 90s/2000s classics — Pure soul & nostalgic feelings.',
+      'Yuvan Shankar Raja (U1) — Deep emotional BGM & vibe melodies.',
+      'Ilaiyaraaja midnight hits — Retro vibes & soft instruments.'
+    ]
+  },
+  {
+    key: 'dateStyle',
+    emoji: '🎬',
+    title: 'SET 4: Ideal First Date Idea',
+    question: 'Tamil Nadu-la first date plan panna, unga favorite choice edhu?',
+    opts: [
+      'FSS/FDF Cinema show (Thalapathy / Thala / Rajini mass movie) + popcorn.',
+      'Besant Nagar / Marina Beach stroll with sundal & long talk.',
+      'Aesthetic ECR / Nungambakkam cafe with nice lighting & cold coffee.',
+      'Peaceful road trip to Mahabalipuram / ECR side on bike or car.'
+    ]
+  },
+  {
+    key: 'weekendChill',
+    emoji: '🌴',
+    title: 'SET 4: Weekend Getaway Vibe',
+    question: '3-day long weekend varudhu! Ungaluku endha trip mood suit aagum?',
+    opts: [
+      'Cool Ooty / Kodaikanal mist, tea estates & hoodie weather.',
+      'Pondicherry ECR vibes, French colony walks & beach cafes.',
+      'Madurai / Tanjore heritage trip & non-stop local food exploring.',
+      'No trip! Room-la AC potu Netflix binge + Swiggy ordering.'
+    ]
+  },
+  {
+    key: 'teaCoffee',
+    emoji: '☕',
+    title: 'SET 4: Daily Energy Boost',
+    question: 'Evening 5 PM stress buster — ungaluku edhu compulsory requirement?',
+    opts: [
+      'Strong Kumbakonam Degree Filter Coffee in brass tumbler.',
+      'Hot Inji (Ginger) Tea / Elachi Tea from roadside shop.',
+      'Iced Americano / Cold Coffee with boba or cream.',
+      'Fresh fruit juice or tender coconut (Elaneer).'
+    ]
+  },
+  {
+    key: 'travelVibe',
+    emoji: '🏍️',
+    title: 'SET 4: Riding / Driving Style',
+    question: 'Partner koode travel pannum bodhu unga mood epdi irukum?',
+    opts: [
+      'Late night bike ride on empty roads with slow music playing.',
+      'Car drive with full AC, high volume songs & singing together.',
+      'Train window seat travel with snacks & chatting all night.',
+      'Short flight / comfortable bus travel to save time.'
+    ]
+  },
+  {
+    key: 'shoppingStyle',
+    emoji: '🛍️',
+    title: 'SET 4: Shopping & Festival Energy',
+    question: 'Diwali / Pongal shopping scene-la unga pattern epdi?',
+    opts: [
+      'T.Nagar / Commercial Street hustle — full crowds & street food!',
+      'Phoenix / Express Avenue Mall — AC walk & brand stores.',
+      'Online shopping 2 weeks before — smooth & zero traffic hassle.',
+      'Simple local boutique / designer wear with custom fitting.'
+    ]
+  },
+  {
+    key: 'familyCulture',
+    emoji: '🪔',
+    title: 'SET 4: Traditional vs Modern Balance',
+    question: 'Relationships & Family Life-la unga balance mindset epdi?',
+    opts: [
+      '100% Traditional — Respecting elders & festive rituals.',
+      'Modern Traditional — Modern lifestyle keeping family values intact.',
+      'Independent & Modern — Personal freedom & career focus.',
+      'Chilled-out Hybrid — Adapting according to what brings peace.'
+    ]
+  }
+];
+
 // ---------- HELPERS & API ----------
 function esc(s) {
   return (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -194,12 +290,12 @@ function renderOnboarding() {
     <div class="card">
       <div class="save-id-box">
         🔑 <strong>Your Resume ID: <span style="color:var(--gold);">${myId}</span></strong>
-        <div style="font-size:11.5px; margin-top:3px; color:var(--muted);">Save this ID to re-login on any device and retrieve your match!</div>
+        <div style="font-size:11.5px; margin-top:3px; color:var(--muted);">Save this ID to re-login on any device!</div>
       </div>
 
       <div class="honest-banner">
         ✨ <strong>Trust the Process</strong><br>
-        Answer genuinely across all 3 question sets. Don't worry about waiting—we'll notify you when your match is locked!
+        Answer genuinely. Enable notifications so you don't miss your 2-minute match chat!
       </div>
 
       <label class="field-label">Your Name or Nickname</label>
@@ -210,7 +306,7 @@ function renderOnboarding() {
 
       <label class="field-label">Your State / Region</label>
       <select id="inState">
-        <option value="Tamil Nadu" ${draft.userState==='Tamil Nadu'?'selected':''}>Tamil Nadu (Tanglish Scenarios)</option>
+        <option value="Tamil Nadu" ${draft.userState==='Tamil Nadu'?'selected':''}>Tamil Nadu (15 Tanglish Questions)</option>
         <option value="Karnataka" ${draft.userState==='Karnataka'?'selected':''}>Karnataka</option>
         <option value="Kerala" ${draft.userState==='Kerala'?'selected':''}>Kerala</option>
         <option value="Maharashtra" ${draft.userState==='Maharashtra'?'selected':''}>Maharashtra</option>
@@ -226,10 +322,10 @@ function renderOnboarding() {
 
       ${errMsg ? `<div class="err">${esc(errMsg)}</div>` : ''}
 
-      <button class="btn btn-gold" onclick="startFullQuiz()">Begin 3-Stage Compatibility Quiz ✨</button>
+      <button class="btn btn-gold" onclick="startFullQuiz()">Begin Compatibility Quiz ✨</button>
       
       <div style="margin-top:16px; text-align:center;">
-        <span style="font-size:12px; color:var(--muted); cursor:pointer; text-decoration:underline;" onclick="resumeSession()">Already registered? Check match status</span>
+        <span style="font-size:12px; color:var(--muted); cursor:pointer; text-decoration:underline;" onclick="resumeSession()">Already registered? Check status</span>
       </div>
     </div>
   `;
@@ -258,15 +354,17 @@ async function startFullQuiz() {
   screen = 'loading';
   render();
 
-  try {
-    const aiRes = await api('/ai-questions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userState: draft.userState })
-    });
-    dynamicRegionalQuestions = aiRes.questions || [];
-  } catch (e) {
-    dynamicRegionalQuestions = [];
+  if (draft.userState !== 'Tamil Nadu') {
+    try {
+      const aiRes = await api('/ai-questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userState: draft.userState })
+      });
+      dynamicRegionalQuestions = aiRes.questions || [];
+    } catch (e) {
+      dynamicRegionalQuestions = [];
+    }
   }
 
   quizIndex = 0;
@@ -276,7 +374,11 @@ async function startFullQuiz() {
 }
 
 function getCombinedQuestions() {
-  return [...SET_1_QUESTIONS, ...SET_2_QUESTIONS, ...SET_3_QUESTIONS, ...dynamicRegionalQuestions];
+  let extraQuestions = dynamicRegionalQuestions;
+  if (draft.userState === 'Tamil Nadu') {
+    extraQuestions = SET_4_TN_QUESTIONS;
+  }
+  return [...SET_1_QUESTIONS, ...SET_2_QUESTIONS, ...SET_3_QUESTIONS, ...extraQuestions];
 }
 
 function renderQuiz() {
@@ -287,7 +389,7 @@ function renderQuiz() {
 
   app.innerHTML = `
     <div class="card">
-      <div class="eyebrow">${q.emoji} Step ${quizIndex + 1} of ${totalQ}</div>
+      <div class="eyebrow">${q.emoji} Question ${quizIndex + 1} of ${totalQ}</div>
       <div class="squad-bar-track" style="margin-bottom:18px;">
         <div class="squad-bar-fill" style="width:${progress}%; background:var(--gold);"></div>
       </div>
@@ -384,7 +486,7 @@ async function renderLobby() {
             🔔 Don't Miss Your Life Partner Chat!
           </div>
           <div style="font-size:12px; color:var(--muted); line-height:1.4; margin-bottom:8px;">
-            No need to wait staring at the screen. Enable notifications and you can safely switch tabs or close your phone. We won't spam you—only ping you the exact moment your match is revealed!
+            No need to wait staring at the screen. Enable notifications so you can freely switch tabs. We will ping you when your match is locked!
           </div>
           ${!hasNotif ? `
             <button class="btn btn-gold" style="padding:8px 14px; font-size:12px; width:auto;" onclick="requestNotificationPermission()">
@@ -397,7 +499,7 @@ async function renderLobby() {
 
         <div class="eyebrow">Round ${state.round} • Synchronized Lobby</div>
         <h1>Matching Matrix Active</h1>
-        <p class="sub">Analyzing 3-set responses across all participants...</p>
+        <p class="sub">Analyzing 15-question responses across participants...</p>
 
         <div style="margin:20px 0;">
           <div class="squad-bar-row">
@@ -440,7 +542,6 @@ async function renderChat() {
     return;
   }
 
-  // Trigger Notification when user enters Chat
   notifyUserMatchFound(myPair.astroTitle, myPair.score);
 
   app.innerHTML = `
