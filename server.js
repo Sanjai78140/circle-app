@@ -6,6 +6,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || __dirname;
 const DATA_FILE = path.join(DATA_DIR, 'data.json');
+const MAX_MEMBERS = 10;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -49,7 +50,13 @@ function scorePair(w, m) {
   
   let totalDiff = 0;
   let count = 0;
-  const dims = ['social', 'planning', 'love', 'conflict', 'family', 'adventure', 'trust', 'independence', 'humor', 'logic_decision', 'logic_conflict'];
+  const dims = [
+    'about_me', 'ideal_self', 'thought_depth', 'partner_trait', 'vibe_check',
+    'conflict_logic', 'love_language', 'taste_food', 'music_vibe', 'weekend_energy',
+    'communication_style', 'future_vision', 'humor_style', 'trust_pace',
+    'growth_mindset', 'financial_logic', 'travel_style', 'social_battery',
+    'relationship_goal', 'spontaneity'
+  ];
   
   dims.forEach(d => {
     if (wAns[d] !== undefined && mAns[d] !== undefined) {
@@ -61,18 +68,13 @@ function scorePair(w, m) {
   const avgDiff = count > 0 ? totalDiff / count : 2;
   const behaviorScore = Math.max(0, 100 - (avgDiff * 25));
 
-  let habitBonus = 0;
-  if (wAns.smoking && mAns.smoking && wAns.smoking === mAns.smoking) habitBonus += 10;
-  if (wAns.drinking && mAns.drinking && wAns.drinking === mAns.drinking) habitBonus += 10;
-  if (wAns.goal && mAns.goal && wAns.goal === mAns.goal) habitBonus += 10;
-
   const wEl = ZODIAC_ELEMENTS[w.zodiac] || 'Air';
   const mEl = ZODIAC_ELEMENTS[m.zodiac] || 'Air';
   const astroRatio = (COMPAT[wEl] && COMPAT[wEl][mEl]) ? COMPAT[wEl][mEl] : 0.7;
   const astroScore = astroRatio * 100;
 
-  const finalScore = Math.round((behaviorScore * 0.45) + (habitBonus) + (astroScore * 0.25));
-  return Math.min(99, Math.max(45, finalScore));
+  const finalScore = Math.round((behaviorScore * 0.75) + (astroScore * 0.25));
+  return Math.min(99, Math.max(50, finalScore));
 }
 
 function chatKey(round, wId, mId) {
@@ -86,8 +88,10 @@ app.get('/api/state', (req, res) => {
 
 app.post('/api/join', (req, res) => {
   let state = loadData();
+  if (state.locked) return res.status(409).json({ error: 'Current circle is locked.' });
+  if (state.members.length >= MAX_MEMBERS) return res.status(409).json({ error: 'Lobby is full (10/10).' });
+
   const { name, age, dob, gender, zodiac, location } = req.body;
-  
   if (!name || !gender) return res.status(400).json({ error: 'Missing basic details' });
   
   const existing = state.members.find(m => m.id === req.body.id);
@@ -131,7 +135,7 @@ app.post('/api/reveal', (req, res) => {
   const men = state.members.filter(m => m.gender === 'man' && m.complete);
 
   if (women.length === 0 || men.length === 0) {
-    return res.status(400).json({ error: 'Need at least one woman and one man.' });
+    return res.status(400).json({ error: 'Need at least one woman and one man in lobby.' });
   }
 
   let candidates = [];
@@ -157,16 +161,15 @@ app.post('/api/reveal', (req, res) => {
         womanName: c.woman.name,
         manName: c.man.name,
         score: c.score,
-        reason: `Matched with ${c.score}% overall harmony across personality, mindset logic, and astrological vibes.`
+        reason: `Matched with ${c.score}% compatibility based on core values, tastes, logic, and lifestyle alignment!`
       });
       
-      // Auto-inject initial welcome message for each pair
       const key = chatKey(state.round, c.woman.id, c.man.id);
       state.chats[key] = {
         messages: [{
           sender: 'system',
-          senderName: '✨ Circle System',
-          text: '🎉 Match Connected! Feel free to chat here, or take your good time and move over to another platform (WhatsApp / Instagram / Call). All the best! 💖',
+          senderName: '⚡ Circle System',
+          text: '🔥 MATCH CONNECTED! Take your good time to chat here, exchange contact info, or move over to WhatsApp/Instagram whenever you like. Wish you both amazing vibes! 💖',
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }]
       };
@@ -211,4 +214,4 @@ app.post('/api/chat/:woman/:man', (req, res) => {
   res.json({ success: true, message: msg });
 });
 
-app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
