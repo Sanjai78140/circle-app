@@ -1,646 +1,418 @@
 const app = document.getElementById('app');
-
-let myId = localStorage.getItem('circleMemberId') || generateId();
-localStorage.setItem('circleMemberId', myId);
-
+let myId = localStorage.getItem('circleMemberId') || null;
 let quizAnswers = {};
 let quizIndex = 0;
-let dynamicRegionalQuestions = [];
 let screen = 'loading';
 let pollTimer = null;
-let heartbeatTimer = null;
-let titleFlashTimer = null;
-let errMsg = '';
-let draft = { name: '', dob: '', gender: '', userState: 'Tamil Nadu' };
-let notificationSent = false;
 
-function generateId() {
-  return 'CIRC_' + Math.random().toString(36).substring(2, 7).toUpperCase();
-}
+const QUOTES = [
+  "“A meaningful connection starts with an open heart and a curious mind.”",
+  "“Logic helps you navigate the world; intuition leads you to the right person.”",
+  "“The right partner doesn’t complete you—they complement your growth.”",
+  "“Great conversations are born when two people listen with genuine care.”",
+  "“Patience in love always brings clarity.”"
+];
 
-// ---------- NOTIFICATION SYSTEM ----------
-function requestNotificationPermission() {
-  if ('Notification' in window) {
-    Notification.requestPermission().then(permission => {
-      if (permission === 'granted') {
-        alert('🔔 Notifications enabled! We will ping you the second your partner is ready.');
-        renderLobby();
-      }
-    });
-  }
-}
-
-function notifyUserMatchFound(partnerName, score) {
-  if (notificationSent) return;
-  notificationSent = true;
-
-  if ('Notification' in window && Notification.permission === 'granted') {
-    new Notification('✨ Match Found in The Circle!', {
-      body: `Your potential life partner (${score}% Match) is waiting! Click to enter your 2-minute chat.`,
-      icon: 'https://fav.farm/💍',
-      tag: 'circle-match'
-    });
-  }
-
-  let flash = false;
-  if (titleFlashTimer) clearInterval(titleFlashTimer);
-  titleFlashTimer = setInterval(() => {
-    document.title = flash ? '🔔 MATCH READY! CLICK HERE' : '✨ Life Partner Found!';
-    flash = !flash;
-  }, 1000);
-
-  window.addEventListener('focus', () => {
-    if (titleFlashTimer) clearInterval(titleFlashTimer);
-    document.title = 'The Circle';
-  }, { once: true });
-}
-
-// ---------- 4-SET QUESTION ARCHITECTURE ----------
-const SET_1_QUESTIONS = [
+const QUESTIONS = [
+  // Logical & Reasoning Scenarios
   {
-    key: 'myLook',
-    emoji: '👤',
-    title: 'SET 1: All About You — Appearance & Style',
-    question: 'How would you best describe your own physical look & skin tone/style?',
-    opts: [
-      'Dusky / Dark skin tone with sharp features & natural charm.',
-      'Fair / Warm tone with a clean, neat & minimalist look.',
-      'Medium / Olive skin tone with an expressive smile & eyes.',
-      'Traditional aesthetic (Veshti/Saree look carries me best).'
+    key: 'logic_decision',
+    title: 'Logical Decision Making',
+    prompt: 'When facing an unexpected sudden change in weekend plans, what is your immediate natural reaction?',
+    options: [
+      { text: 'A) Quickly analyze alternative solutions and re-structure logically.', val: 1 },
+      { text: 'B) Go with the flow spontaneously without overthinking.', val: 2 },
+      { text: 'C) Feel slightly irritated first, then slowly adapt step-by-step.', val: 3 },
+      { text: 'D) Pause and consult with my partner/friends before deciding.', val: 4 }
     ]
   },
   {
-    key: 'selfVibe',
-    emoji: '⚡',
-    title: 'SET 1: All About You — Natural Energy',
-    question: 'What energy do you naturally bring into a relationship?',
-    opts: [
-      'Calm, loyal, protective & deeply grounded.',
-      'Witty, energetic, talkative & full of humor.',
-      'Soft-spoken, attentive listener & empathetic.',
-      'Bold, passionate, spontaneous & adventurous.'
+    key: 'logic_conflict',
+    title: 'Reasoning Under Disagreement',
+    prompt: 'If you and your partner hold completely opposite opinions on a major topic, how do you logically resolve it?',
+    options: [
+      { text: 'A) Lay down facts and logical pros/cons to reach a objective solution.', val: 1 },
+      { text: 'B) Value emotional harmony over being right—agree to disagree gracefully.', val: 2 },
+      { text: 'C) Discuss deeply until a balanced 50/50 compromise is found.', val: 3 },
+      { text: 'D) Take some space to process independently before talking it out.', val: 4 }
+    ]
+  },
+  // Behavioral & Personality Dimensions
+  {
+    key: 'social',
+    title: 'Social Energy',
+    prompt: 'After a long, demanding week, how do you recharge best?',
+    options: [
+      { text: 'A) Unwind peacefully alone at home with quiet comfort.', val: 1 },
+      { text: 'B) Catch up with a close friend or two over deep conversation.', val: 2 },
+      { text: 'C) Go out to a lively social gathering, party, or event.', val: 3 },
+      { text: 'D) Explore a completely new place or outdoor activity.', val: 4 }
+    ]
+  },
+  {
+    key: 'planning',
+    title: 'Life & Travel Style',
+    prompt: 'How do you approach planning vacations or long trips?',
+    options: [
+      { text: 'A) Detailed step-by-step itinerary planned weeks in advance.', val: 1 },
+      { text: 'B) Rough outline with plenty of open room for spontaneous choices.', val: 2 },
+      { text: 'C) Purely zero planning—figure out everything on the spot.', val: 3 }
+    ]
+  },
+  {
+    key: 'love',
+    title: 'Love Expression',
+    prompt: 'Which gesture makes you feel most genuinely valued in a relationship?',
+    options: [
+      { text: 'A) Meaningful words of encouragement and appreciative compliments.', val: 1 },
+      { text: 'B) Dedicated quality time with zero phone distractions.', val: 2 },
+      { text: 'C) Thoughtful actions and practical help when you need it.', val: 3 },
+      { text: 'D) Warm physical presence and affectionate contact.', val: 4 }
+    ]
+  },
+  {
+    key: 'goal',
+    title: 'Relationship Intentions',
+    prompt: 'What are you primarily looking for on The Circle right now?',
+    options: [
+      { text: 'A) A deep, long-term meaningful partnership leading to commitment.', val: 1 },
+      { text: 'B) Genuine dating to see where natural chemistry takes us.', val: 2 },
+      { text: 'C) Expanding my circle with like-minded friends first.', val: 3 }
     ]
   }
 ];
 
-const SET_2_QUESTIONS = [
-  {
-    key: 'partnerLook',
-    emoji: '👁️',
-    title: 'SET 2: Partner Expectations — Appearance',
-    question: 'What complexion or visual style do you find most attractive in a partner?',
-    opts: [
-      'Dusky / Dark skin guys or girls with sharp, natural charm.',
-      'Fair / Warm tones with a neat & minimalist style.',
-      'Complexion doesn’t matter—smile & posture win me over.',
-      'Traditional look (Saree / Veshti-Kurta look instantly wins!).'
-    ]
-  },
-  {
-    key: 'partnerVibe',
-    emoji: '💖',
-    title: 'SET 2: Partner Expectations — Personality Vibe',
-    question: 'What personality archetype are you looking for?',
-    opts: [
-      'Best-friend vibe: Fun, teasing & easy to talk to.',
-      'Protective & caring: Mature, strong & reliable.',
-      'Calm & gentle: Peaceful, quiet & deeply understanding.',
-      'High energy: Passionate, ambitious & adventurous.'
-    ]
-  }
-];
-
-const SET_3_QUESTIONS = [
-  {
-    key: 'conflictStyle',
-    emoji: '🕊️',
-    title: 'SET 3: How You Act — Conflict Management',
-    question: 'When an argument or misunderstanding happens, how do you handle it?',
-    opts: [
-      'Talk it out immediately with calm honesty—no hiding.',
-      'Take a short quiet pause to cool off, then resolve gently.',
-      'Use light humor or a hug first to ease the tension.',
-      'Write down thoughts to communicate clearly without emotion.'
-    ]
-  },
-  {
-    key: 'loveLanguage',
-    emoji: '💌',
-    title: 'SET 3: How You Act — Love Language',
-    question: 'How do you express deep love & trust in daily life?',
-    opts: [
-      'Quality time & long un-interrupted conversations.',
-      'Acts of service (doing thoughtful small things for them).',
-      'Words of affirmation (reminding them often how special they are).',
-      'Physical touch, warm hugs & hand-holding.'
-    ]
-  },
-  {
-    key: 'intention',
-    emoji: '💍',
-    title: 'SET 3: Deep Goal — Trust & Commitment',
-    question: 'What is your genuine goal with this process?',
-    opts: [
-      'Long-term serious connection leading to marriage.',
-      'Meaningful relationship built on mutual respect & trust.',
-      'Best-friends first to build strong natural chemistry.',
-      'Exploring true compatibility without pressure.'
-    ]
-  }
-];
-
-const SET_4_TN_QUESTIONS = [
-  {
-    key: 'foodVibe',
-    emoji: '🍗',
-    title: 'SET 4: Ultimate Food Debate',
-    question: 'Weekend Night Out! Unagaluku edhu ultimate comfort food spot?',
-    opts: [
-      'Hot Dindigul / Thalappakatti Mutton Biryani with Seeraga Samba rice!',
-      'Crispy Parotta with Salna at 1 AM local street stall!',
-      'Peaceful Cafe burger & pasta with cozy aesthetics.',
-      'Simple Home-cooked Podi Dosa & Filter Coffee.'
-    ]
-  },
-  {
-    key: 'musicVibe',
-    emoji: '🎧',
-    title: 'SET 4: Music & Playlist Chemistry',
-    question: 'Car-la long drive pogum bodhu, playlist yarudhu play aaganum?',
-    opts: [
-      'Sai Abhyankarr / Anirudh — Modern upbeat tracks & trending songs.',
-      'A.R. Rahman 90s/2000s classics — Pure soul & nostalgic feelings.',
-      'Yuvan Shankar Raja (U1) — Deep emotional BGM & vibe melodies.',
-      'Ilaiyaraaja midnight hits — Retro vibes & soft instruments.'
-    ]
-  },
-  {
-    key: 'dateStyle',
-    emoji: '🎬',
-    title: 'SET 4: Ideal First Date Idea',
-    question: 'Tamil Nadu-la first date plan panna, unga favorite choice edhu?',
-    opts: [
-      'FSS/FDF Cinema show (Thalapathy / Thala / Rajini mass movie) + popcorn.',
-      'Besant Nagar / Marina Beach stroll with sundal & long talk.',
-      'Aesthetic ECR / Nungambakkam cafe with nice lighting & cold coffee.',
-      'Peaceful road trip to Mahabalipuram / ECR side on bike or car.'
-    ]
-  },
-  {
-    key: 'weekendChill',
-    emoji: '🌴',
-    title: 'SET 4: Weekend Getaway Vibe',
-    question: '3-day long weekend varudhu! Ungaluku endha trip mood suit aagum?',
-    opts: [
-      'Cool Ooty / Kodaikanal mist, tea estates & hoodie weather.',
-      'Pondicherry ECR vibes, French colony walks & beach cafes.',
-      'Madurai / Tanjore heritage trip & non-stop local food exploring.',
-      'No trip! Room-la AC potu Netflix binge + Swiggy ordering.'
-    ]
-  },
-  {
-    key: 'teaCoffee',
-    emoji: '☕',
-    title: 'SET 4: Daily Energy Boost',
-    question: 'Evening 5 PM stress buster — ungaluku edhu compulsory requirement?',
-    opts: [
-      'Strong Kumbakonam Degree Filter Coffee in brass tumbler.',
-      'Hot Inji (Ginger) Tea / Elachi Tea from roadside shop.',
-      'Iced Americano / Cold Coffee with boba or cream.',
-      'Fresh fruit juice or tender coconut (Elaneer).'
-    ]
-  },
-  {
-    key: 'travelVibe',
-    emoji: '🏍️',
-    title: 'SET 4: Riding / Driving Style',
-    question: 'Partner koode travel pannum bodhu unga mood epdi irukum?',
-    opts: [
-      'Late night bike ride on empty roads with slow music playing.',
-      'Car drive with full AC, high volume songs & singing together.',
-      'Train window seat travel with snacks & chatting all night.',
-      'Short flight / comfortable bus travel to save time.'
-    ]
-  },
-  {
-    key: 'shoppingStyle',
-    emoji: '🛍️',
-    title: 'SET 4: Shopping & Festival Energy',
-    question: 'Diwali / Pongal shopping scene-la unga pattern epdi?',
-    opts: [
-      'T.Nagar / Commercial Street hustle — full crowds & street food!',
-      'Phoenix / Express Avenue Mall — AC walk & brand stores.',
-      'Online shopping 2 weeks before — smooth & zero traffic hassle.',
-      'Simple local boutique / designer wear with custom fitting.'
-    ]
-  },
-  {
-    key: 'familyCulture',
-    emoji: '🪔',
-    title: 'SET 4: Traditional vs Modern Balance',
-    question: 'Relationships & Family Life-la unga balance mindset epdi?',
-    opts: [
-      '100% Traditional — Respecting elders & festive rituals.',
-      'Modern Traditional — Modern lifestyle keeping family values intact.',
-      'Independent & Modern — Personal freedom & career focus.',
-      'Chilled-out Hybrid — Adapting according to what brings peace.'
-    ]
-  }
-];
-
-// ---------- HELPERS & API ----------
-function esc(s) {
-  return (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function esc(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-async function api(path, options = {}) {
-  const res = await fetch('/api' + path, options);
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, opts);
   if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || 'Server error');
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Server request failed');
   }
   return res.json();
 }
 
-function sendHeartbeat() {
-  if (myId) {
-    api('/heartbeat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ memberId: myId })
-    }).catch(() => {});
-  }
-}
-
-// ---------- RENDER VIEWS ----------
-function render() {
-  if (screen === 'loading') renderLoading();
-  else if (screen === 'onboarding') renderOnboarding();
-  else if (screen === 'quiz') renderQuiz();
-  else if (screen === 'lobby') renderLobby();
-  else if (screen === 'chat') renderChat();
-}
-
-function renderLoading() {
-  app.innerHTML = `<div class="card"><div class="sub">Analyzing Compatibility Matrix...</div></div>`;
-}
-
-function renderOnboarding() {
-  app.innerHTML = `
-    <div class="card">
-      <div class="save-id-box">
-        🔑 <strong>Your Resume ID: <span style="color:var(--gold);">${myId}</span></strong>
-        <div style="font-size:11.5px; margin-top:3px; color:var(--muted);">Save this ID to re-login on any device!</div>
-      </div>
-
-      <div class="honest-banner">
-        ✨ <strong>Trust the Process</strong><br>
-        Answer genuinely. Enable notifications so you don't miss your 2-minute match chat!
-      </div>
-
-      <label class="field-label">Your Name or Nickname</label>
-      <input type="text" id="inName" value="${esc(draft.name)}" placeholder="e.g. Vikram / Priya">
-
-      <label class="field-label">Date of Birth (For Zodiac Synastry)</label>
-      <input type="date" id="inDob" value="${esc(draft.dob)}">
-
-      <label class="field-label">Your State / Region</label>
-      <select id="inState">
-        <option value="Tamil Nadu" ${draft.userState==='Tamil Nadu'?'selected':''}>Tamil Nadu (15 Tanglish Questions)</option>
-        <option value="Karnataka" ${draft.userState==='Karnataka'?'selected':''}>Karnataka</option>
-        <option value="Kerala" ${draft.userState==='Kerala'?'selected':''}>Kerala</option>
-        <option value="Maharashtra" ${draft.userState==='Maharashtra'?'selected':''}>Maharashtra</option>
-        <option value="Delhi / North India" ${draft.userState==='Delhi / North India'?'selected':''}>Delhi / North India</option>
-        <option value="Other / International" ${draft.userState==='Other / International'?'selected':''}>Other / International</option>
-      </select>
-
-      <label class="field-label">I identify as...</label>
-      <div class="gender-row">
-        <div class="gender-opt ${draft.gender === 'woman' ? 'sel' : ''}" onclick="selectGender('woman')">Woman</div>
-        <div class="gender-opt ${draft.gender === 'man' ? 'sel' : ''}" onclick="selectGender('man')">Man</div>
-      </div>
-
-      ${errMsg ? `<div class="err">${esc(errMsg)}</div>` : ''}
-
-      <button class="btn btn-gold" onclick="startFullQuiz()">Begin Compatibility Quiz ✨</button>
-      
-      <div style="margin-top:16px; text-align:center;">
-        <span style="font-size:12px; color:var(--muted); cursor:pointer; text-decoration:underline;" onclick="resumeSession()">Already registered? Check status</span>
-      </div>
-    </div>
-  `;
-}
-
-function selectGender(g) {
-  draft.gender = g;
-  draft.name = document.getElementById('inName').value;
-  draft.dob = document.getElementById('inDob').value;
-  draft.userState = document.getElementById('inState').value;
-  render();
-}
-
-async function startFullQuiz() {
-  draft.name = document.getElementById('inName').value.trim();
-  draft.dob = document.getElementById('inDob').value;
-  draft.userState = document.getElementById('inState').value;
-
-  if (!draft.name || !draft.dob || !draft.gender) {
-    errMsg = 'Please fill in your name, birthday, and gender.';
+// Check existing session
+async function checkSession() {
+  if (!myId) {
+    screen = 'landing';
     render();
     return;
   }
-
-  errMsg = '';
-  screen = 'loading';
-  render();
-
-  if (draft.userState !== 'Tamil Nadu') {
-    try {
-      const aiRes = await api('/ai-questions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userState: draft.userState })
-      });
-      dynamicRegionalQuestions = aiRes.questions || [];
-    } catch (e) {
-      dynamicRegionalQuestions = [];
-    }
-  }
-
-  quizIndex = 0;
-  quizAnswers = {};
-  screen = 'quiz';
-  render();
-}
-
-function getCombinedQuestions() {
-  let extraQuestions = dynamicRegionalQuestions;
-  if (draft.userState === 'Tamil Nadu') {
-    extraQuestions = SET_4_TN_QUESTIONS;
-  }
-  return [...SET_1_QUESTIONS, ...SET_2_QUESTIONS, ...SET_3_QUESTIONS, ...extraQuestions];
-}
-
-function renderQuiz() {
-  const currentQuestions = getCombinedQuestions();
-  const q = currentQuestions[quizIndex];
-  const totalQ = currentQuestions.length;
-  const progress = Math.round(((quizIndex + 1) / totalQ) * 100);
-
-  app.innerHTML = `
-    <div class="card">
-      <div class="eyebrow">${q.emoji} Question ${quizIndex + 1} of ${totalQ}</div>
-      <div class="squad-bar-track" style="margin-bottom:18px;">
-        <div class="squad-bar-fill" style="width:${progress}%; background:var(--gold);"></div>
-      </div>
-
-      <h2>${esc(q.title)}</h2>
-      <p class="sub">${esc(q.question)}</p>
-
-      <div class="q-options">
-        ${q.opts.map(opt => `
-          <div class="q-opt" onclick="answerQuestion('${q.key}', '${esc(opt)}')">
-            ${esc(opt)}
-          </div>
-        `).join('')}
-      </div>
-    </div>
-  `;
-}
-
-async function answerQuestion(key, val) {
-  quizAnswers[key] = val;
-  quizIndex++;
-
-  const allQ = getCombinedQuestions();
-  if (quizIndex < allQ.length) {
-    render();
-  } else {
-    screen = 'loading';
-    render();
-    try {
-      await api('/join', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: myId,
-          name: draft.name,
-          dob: draft.dob,
-          gender: draft.gender,
-          userState: draft.userState,
-          answers: quizAnswers
-        })
-      });
-      screen = 'lobby';
-      startPolling();
-    } catch (e) {
-      errMsg = e.message;
-      screen = 'onboarding';
-      render();
-    }
-  }
-}
-
-async function resumeSession() {
-  const enterId = prompt("Enter your saved Resume ID:", myId);
-  if (enterId) {
-    myId = enterId.trim();
-    localStorage.setItem('circleMemberId', myId);
-    screen = 'loading';
-    render();
-    try {
-      const state = await api('/state');
-      if (state.members.some(m => m.id === myId)) {
-        screen = state.locked ? 'chat' : 'lobby';
-        startPolling();
-      } else {
-        alert("ID not found in current active round.");
-        screen = 'onboarding';
-      }
-    } catch (e) {
-      screen = 'onboarding';
-    }
-    render();
-  }
-}
-
-async function renderLobby() {
   try {
-    const state = await api('/state');
-    if (state.locked) {
-      screen = 'chat';
-      renderChat();
-      return;
+    const me = await api(`/me/${myId}`);
+    const st = await api('/state');
+    
+    if (st.locked) {
+      const myPair = st.pairs.find(p => p.womanId === myId || p.manId === myId);
+      if (myPair) {
+        screen = 'chat';
+        render();
+        startPolling();
+        return;
+      }
     }
+    
+    if (me.complete) {
+      screen = 'lobby';
+    } else {
+      screen = 'quiz';
+    }
+    render();
+    startPolling();
+  } catch (e) {
+    localStorage.removeItem('circleMemberId');
+    myId = null;
+    screen = 'landing';
+    render();
+  }
+}
 
-    const hasNotif = 'Notification' in window && Notification.permission === 'granted';
+// Directly enter ID on Landing Box
+async function resumeByID() {
+  const idInput = document.getElementById('inputMemberId');
+  const val = idInput ? idInput.value.trim() : '';
+  if (!val) return alert('Please enter your valid ID');
+
+  try {
+    const me = await api(`/me/${val}`);
+    myId = val;
+    localStorage.setItem('circleMemberId', myId);
+    
+    const st = await api('/state');
+    if (st.locked) {
+      const myPair = st.pairs.find(p => p.womanId === myId || p.manId === myId);
+      if (myPair) {
+        screen = 'chat';
+        render();
+        startPolling();
+        return;
+      }
+    }
+    
+    screen = me.complete ? 'lobby' : 'quiz';
+    render();
+    startPolling();
+  } catch (e) {
+    alert('Member ID not found. Please register or re-check your ID.');
+  }
+}
+
+function render() {
+  if (screen === 'landing') {
+    app.innerHTML = `
+      <div class="card">
+        <div class="eyebrow">Matchmaking Circle</div>
+        <h1 style="margin-top:0;">Find Your Match</h1>
+        <p style="color:var(--muted); font-size:14px;">Answer a few logical and personality scenarios to connect with compatible partners.</p>
+        
+        <form onsubmit="event.preventDefault(); submitLanding();">
+          <div style="margin-bottom:12px;">
+            <label style="font-size:12px; color:var(--muted);">Your Full Name</label>
+            <input id="inName" type="text" placeholder="e.g. Priya or Rahul" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--line); background:var(--bg-2); color:#fff;" required />
+          </div>
+          <div style="margin-bottom:12px;">
+            <label style="font-size:12px; color:var(--muted);">Gender</label>
+            <select id="inGender" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--line); background:var(--bg-2); color:#fff;" required>
+              <option value="">Select Gender</option>
+              <option value="woman">Woman</option>
+              <option value="man">Man</option>
+            </select>
+          </div>
+          <div style="margin-bottom:16px;">
+            <label style="font-size:12px; color:var(--muted);">Zodiac Sign</label>
+            <select id="inZodiac" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--line); background:var(--bg-2); color:#fff;">
+              <option value="Aries">Aries ♈</option>
+              <option value="Taurus">Taurus ♉</option>
+              <option value="Gemini">Gemini ♊</option>
+              <option value="Cancer">Cancer ♋</option>
+              <option value="Leo">Leo ♌</option>
+              <option value="Virgo">Virgo ♍</option>
+              <option value="Libra">Libra ♎</option>
+              <option value="Scorpio">Scorpio ♏</option>
+              <option value="Sagittarius">Sagittarius ♐</option>
+              <option value="Capricorn">Capricorn ♑</option>
+              <option value="Aquarius">Aquarius ♒</option>
+              <option value="Pisces">Pisces ♓</option>
+            </select>
+          </div>
+          <button type="submit" style="width:100%; padding:12px; border-radius:8px; background:var(--gold); color:#120f26; font-weight:600; border:none; cursor:pointer;">Begin Scenarios →</button>
+        </form>
+
+        <hr style="border:0; border-top:1px solid var(--line); margin:24px 0;">
+
+        <div style="text-align:center;">
+          <p style="font-size:13px; color:var(--muted); margin-bottom:8px;">Already registered? Enter your Member ID to jump straight back in:</p>
+          <div style="display:flex; gap:8px;">
+            <input id="inputMemberId" type="text" placeholder="e.g. circle_x89a" style="flex:1; padding:8px; border-radius:8px; border:1px solid var(--line); background:var(--bg-2); color:#fff;" />
+            <button onclick="resumeByID()" style="padding:8px 16px; border-radius:8px; background:var(--surface-2); color:var(--gold); border:1px solid var(--gold); cursor:pointer;">Enter Chat</button>
+          </div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  if (screen === 'quiz') {
+    const q = QUESTIONS[quizIndex];
+    const quote = QUOTES[quizIndex % QUOTES.length];
 
     app.innerHTML = `
       <div class="card">
-        <div class="save-id-box" style="margin-bottom:14px;">
-          🔑 Resume ID: <strong>${myId}</strong>
+        <div style="background:rgba(217,180,106,0.1); border-left:3px solid var(--gold); padding:10px 14px; border-radius:6px; font-style:italic; font-size:13px; color:var(--gold-soft); margin-bottom:20px;">
+          ${quote}
         </div>
 
-        <div style="background:rgba(217,180,106,0.12); border:1px solid var(--gold); border-radius:12px; padding:12px 14px; margin-bottom:16px; text-align:left;">
-          <div style="font-weight:600; font-size:13.5px; color:var(--gold-soft); margin-bottom:4px;">
-            🔔 Don't Miss Your Life Partner Chat!
-          </div>
-          <div style="font-size:12px; color:var(--muted); line-height:1.4; margin-bottom:8px;">
-            No need to wait staring at the screen. Enable notifications so you can freely switch tabs. We will ping you when your match is locked!
-          </div>
-          ${!hasNotif ? `
-            <button class="btn btn-gold" style="padding:8px 14px; font-size:12px; width:auto;" onclick="requestNotificationPermission()">
-              Enable Match Notifications 🔔
+        <div style="display:flex; justify-space-between; align-items:center; margin-bottom:12px;">
+          <span class="eyebrow">${q.title}</span>
+          <span style="font-size:12px; color:var(--muted);">Question ${quizIndex + 1} of ${QUESTIONS.length}</span>
+        </div>
+        
+        <h3 style="margin:0 0 16px 0;">${q.prompt}</h3>
+
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          ${q.options.map(opt => `
+            <button onclick="answerQuiz('${q.key}', ${opt.val})" style="text-align:left; padding:12px 16px; border-radius:10px; border:1px solid var(--line); background:var(--surface); color:var(--text); cursor:pointer;">
+              ${esc(opt.text)}
             </button>
-          ` : `
-            <span style="font-size:11.5px; color:#6bc992;">✅ Notifications active! You can safely leave this tab open in the background.</span>
-          `}
+          `).join('')}
         </div>
 
-        <div class="eyebrow">Round ${state.round} • Synchronized Lobby</div>
-        <h1>Matching Matrix Active</h1>
-        <p class="sub">Analyzing 15-question responses across participants...</p>
-
-        <div style="margin:20px 0;">
-          <div class="squad-bar-row">
-            <div class="squad-bar-label"><span>Women Joined</span><span>${state.womenCount} / 5</span></div>
-            <div class="squad-bar-track"><div class="squad-bar-fill" style="width:${(state.womenCount/5)*100}%; background:var(--woman);"></div></div>
-          </div>
-          <div class="squad-bar-row">
-            <div class="squad-bar-label"><span>Men Joined</span><span>${state.menCount} / 5</span></div>
-            <div class="squad-bar-track"><div class="squad-bar-fill" style="width:${(state.menCount/5)*100}%; background:var(--man);"></div></div>
-          </div>
+        <div style="display:flex; justify-content:space-between; margin-top:20px;">
+          ${quizIndex > 0 ? `<button onclick="prevQuiz()" style="padding:8px 16px; background:none; border:1px solid var(--line); color:var(--muted); border-radius:6px; cursor:pointer;">← Previous</button>` : `<div></div>`}
         </div>
-
-        <button class="btn btn-gold" onclick="triggerReveal()">Calculate & Reveal Matches ✨</button>
       </div>
     `;
-  } catch (e) {}
+    return;
+  }
+
+  if (screen === 'lobby') {
+    app.innerHTML = `
+      <div class="card" style="text-align:center;">
+        <div class="eyebrow">Circle Lobby</div>
+        <h2>Waiting for Matches</h2>
+        <p style="color:var(--muted); font-size:14px;">Your profile and logical scenario responses are active. Click below to reveal your compatibility match!</p>
+        
+        <div style="background:var(--bg-2); padding:12px; border-radius:8px; border:1px dashed var(--gold); margin:20px 0; word-break:break-all;">
+          <span style="font-size:11px; color:var(--muted); display:block;">YOUR MEMBER ID (Save this to return anytime)</span>
+          <strong style="color:var(--gold); font-size:18px;">${myId}</strong>
+        </div>
+
+        <button onclick="triggerReveal()" style="width:100%; padding:14px; border-radius:8px; background:var(--gold); color:#120f26; font-weight:600; border:none; cursor:pointer;">Reveal Matches & Enter Chat →</button>
+      </div>
+    `;
+    return;
+  }
+
+  if (screen === 'chat') {
+    app.innerHTML = `
+      <div class="card">
+        <div id="statusBanner" style="background:rgba(217,180,106,0.12); border:1px solid var(--gold); padding:10px 14px; border-radius:8px; margin-bottom:16px;">
+          💬 <strong>Match Connected!</strong><br>
+          <span style="font-size:12px; color:var(--muted);">Take your time to chat here or exchange socials/numbers to move to another platform!</span>
+        </div>
+
+        <div id="chatBox" style="height:320px; overflow-y:auto; background:var(--bg-2); border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:12px;">
+          <div style="color:var(--muted); font-size:13px; text-align:center;">Loading conversation...</div>
+        </div>
+
+        <div style="display:flex; gap:8px;">
+          <input id="chatInput" type="text" placeholder="Type a message..." style="flex:1; padding:10px; border-radius:8px; border:1px solid var(--line); background:var(--bg-2); color:#fff;" onkeypress="if(event.key==='Enter') sendChat();" />
+          <button onclick="sendChat()" style="padding:10px 20px; border-radius:8px; background:var(--gold); color:#120f26; font-weight:600; border:none; cursor:pointer;">Send</button>
+        </div>
+      </div>
+    `;
+    loadChat();
+    return;
+  }
 }
 
-async function triggerReveal() {
+async function submitLanding() {
+  const name = document.getElementById('inName').value;
+  const gender = document.getElementById('inGender').value;
+  const zodiac = document.getElementById('inZodiac').value;
+
   try {
-    await api('/reveal', { method: 'POST' });
-    screen = 'chat';
+    const res = await api('/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, gender, zodiac })
+    });
+    myId = res.id;
+    localStorage.setItem('circleMemberId', myId);
+    screen = 'quiz';
     render();
   } catch (e) {
     alert(e.message);
   }
 }
 
-async function renderChat() {
-  const state = await api('/state');
-  const myPair = state.pairs.find(p => p.womanId === myId || p.manId === myId);
-
-  if (!myPair) {
-    app.innerHTML = `
-      <div class="card">
-        <h2>Circle Unmatched This Round</h2>
-        <p class="sub">The circle will auto-loop into the next round shortly!</p>
-      </div>
-    `;
-    return;
+function answerQuiz(key, val) {
+  quizAnswers[key] = val;
+  if (quizIndex < QUESTIONS.length - 1) {
+    quizIndex++;
+    render();
+  } else {
+    finishQuiz();
   }
-
-  notifyUserMatchFound(myPair.astroTitle, myPair.score);
-
-  app.innerHTML = `
-    <div class="card">
-      <div class="eyebrow">Match Breakdown • ${myPair.score}% Harmony Score</div>
-      <h2>${esc(myPair.astroTitle)}</h2>
-      <p class="sub" style="font-style:italic;">"${esc(myPair.why)}"</p>
-      
-      <div id="statusBanner" style="background:var(--surface-2); padding:10px 14px; border-radius:10px; font-size:13px; margin-bottom:14px; border:1px solid var(--line);">
-        Checking presence...
-      </div>
-
-      <div class="chat-box" id="chatBox" style="height:230px; overflow-y:auto; border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:12px;"></div>
-
-      <div style="display:flex; gap:8px;">
-        <input type="text" id="chatInput" placeholder="Send a genuine message..." onkeypress="if(event.key==='Enter') sendChat('${myPair.womanId}', '${myPair.manId}')">
-        <button class="btn btn-gold" style="width:auto;" onclick="sendChat('${myPair.womanId}', '${myPair.manId}')">Send</button>
-      </div>
-    </div>
-  `;
-
-  loadChat(myPair.womanId, myPair.manId);
 }
 
-async function loadChat(wId, mId) {
-  try {
-    const res = await api(`/chat/${wId}/${mId}`);
-    const banner = document.getElementById('statusBanner');
-    
-    if (banner) {
-      if (!res.started) {
-        banner.innerHTML = `⏳ <strong>Waiting for partner to come online...</strong><br><span style="font-size:11.5px; color:var(--muted);">2-minute chat timer starts automatically when BOTH partners are in the room!</span>`;
-      } else {
-        banner.innerHTML = `🔥 <strong>Both Online! 2-Min Live Chat active: <span style="color:var(--gold);">${res.secsLeft}s remaining</span></strong>`;
-      }
-    }
+function prevQuiz() {
+  if (quizIndex > 0) {
+    quizIndex--;
+    render();
+  }
+}
 
+async function finishQuiz() {
+  try {
+    await api('/answers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: myId, answers: quizAnswers })
+    });
+    screen = 'lobby';
+    render();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function triggerReveal() {
+  try {
+    const st = await api('/reveal', { method: 'POST' });
+    const myPair = st.pairs.find(p => p.womanId === myId || p.manId === myId);
+    if (myPair) {
+      screen = 'chat';
+    } else {
+      alert('Matches revealed! Checking your pair status...');
+      screen = 'lobby';
+    }
+    render();
+    startPolling();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function loadChat() {
+  try {
+    const st = await api('/state');
+    const myPair = st.pairs.find(p => p.womanId === myId || p.manId === myId);
+    if (!myPair) return;
+
+    const res = await api(`/chat/${myPair.womanId}/${myPair.manId}`);
     const box = document.getElementById('chatBox');
     if (!box) return;
+
     box.innerHTML = res.messages.map(m => `
-      <div style="margin-bottom:8px; text-align:${m.sender === myId ? 'right' : 'left'};">
-        <span style="font-size:11px; color:var(--muted);">${esc(m.senderName)} • ${m.time}</span>
-        <div style="background:${m.sender === myId ? 'var(--gold)' : 'var(--surface-2)'}; color:${m.sender === myId ? '#1a1330' : 'var(--text)'}; display:inline-block; padding:8px 12px; border-radius:12px; max-width:80%; font-size:14px;">
+      <div style="margin-bottom:10px; text-align:${m.sender === myId ? 'right' : m.sender === 'system' ? 'center' : 'left'};">
+        <span style="font-size:10.5px; color:var(--muted);">${esc(m.senderName)} • ${m.time}</span>
+        <div style="background:${m.sender === myId ? 'var(--gold)' : m.sender === 'system' ? 'rgba(217,180,106,0.15)' : 'var(--surface-2)'}; 
+                    color:${m.sender === myId ? '#120f26' : 'var(--text)'}; 
+                    display:inline-block; padding:8px 12px; border-radius:10px; max-width:85%; font-size:13.5px;
+                    border:${m.sender === 'system' ? '1px dashed var(--gold)' : 'none'}; margin-top:2px;">
           ${esc(m.text)}
         </div>
       </div>
-    `).join('') || '<div style="color:var(--muted); font-size:13px;">No messages yet. Say hello! 👋</div>';
+    `).join('') || '<div style="color:var(--muted); font-size:13px;">No messages yet.</div>';
+
     box.scrollTop = box.scrollHeight;
   } catch (e) {}
 }
 
-async function sendChat(wId, mId) {
+async function sendChat() {
   const input = document.getElementById('chatInput');
-  const text = input.value.trim();
+  const text = input ? input.value.trim() : '';
   if (!text) return;
+
   try {
-    await api(`/chat/${wId}/${mId}`, {
+    const st = await api('/state');
+    const myPair = st.pairs.find(p => p.womanId === myId || p.manId === myId);
+    if (!myPair) return;
+
+    const me = await api(`/me/${myId}`);
+    await api(`/chat/${myPair.womanId}/${myPair.manId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sender: myId, senderName: draft.name || 'You', text })
+      body: JSON.stringify({ sender: myId, senderName: me.name || 'You', text })
     });
+
     input.value = '';
-    loadChat(wId, mId);
+    loadChat();
   } catch (e) {}
 }
 
 function startPolling() {
-  stopPolling();
-  sendHeartbeat();
-  heartbeatTimer = setInterval(sendHeartbeat, 5000);
-
+  if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(() => {
-    if (screen === 'lobby') renderLobby();
-    if (screen === 'chat') {
-      api('/state').then(st => {
-        const myPair = st.pairs.find(p => p.womanId === myId || p.manId === myId);
-        if (myPair) loadChat(myPair.womanId, myPair.manId);
-      });
-    }
+    if (screen === 'chat') loadChat();
   }, 2500);
 }
 
-function stopPolling() {
-  if (pollTimer) clearInterval(pollTimer);
-  if (heartbeatTimer) clearInterval(heartbeatTimer);
-}
-
-// Boot up
-(async function init() {
-  try {
-    const st = await api('/state');
-    if (myId && st.members.some(m => m.id === myId)) {
-      screen = st.locked ? 'chat' : 'lobby';
-      startPolling();
-    } else {
-      screen = 'onboarding';
-    }
-  } catch (e) {
-    screen = 'onboarding';
-  }
-  render();
-})();
+// Start app
+checkSession();
