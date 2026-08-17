@@ -4,7 +4,20 @@ let quizAnswers = {};
 let quizIndex = 0;
 let screen = 'landing';
 let pollTimer = null;
+let fortuneTimer = null;
+let fortuneIndex = 0;
 let hasNotifiedMatch = false;
+let pushAttempted = false;
+
+const FORTUNES = [
+  "🌙 The right people are already circling toward you.",
+  "✨ Good energy attracts good energy — you're in the right room.",
+  "🍀 Someone in this circle is hoping you don't leave before reveal.",
+  "💫 Patience now, spark later.",
+  "🔥 The best conversations start with the smallest bit of courage.",
+  "🌸 You don't need to be everyone's match — just one honest one.",
+  "🎲 Every round shuffles the universe a little. This could be yours."
+];
 
 const QUOTES = [
   "“A meaningful connection starts with an open heart and a curious mind.”",
@@ -51,6 +64,50 @@ function requestNotificationPermission() {
   }
 }
 
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const output = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) output[i] = rawData.charCodeAt(i);
+  return output;
+}
+
+// Real Web Push — fires even if the tab/browser is closed, unlike the
+// foreground-only Notification calls above. Silently no-ops on browsers
+// that don't support it, or if the user hasn't granted permission; the
+// in-tab fallback (sendMatchNotification) still covers that case.
+async function registerPush() {
+  if (pushAttempted || !myId) return;
+  pushAttempted = true;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+  try {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return;
+
+    const { key } = await api('/push/vapidPublicKey');
+    if (!key) return;
+
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(key)
+      });
+    }
+
+    await api('/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: myId, subscription: sub })
+    });
+  } catch (e) {
+    // Push isn't critical — the app still works fine without it.
+  }
+}
+
 function sendMatchNotification(partnerName, score) {
   if (hasNotifiedMatch) return;
   hasNotifiedMatch = true;
@@ -68,6 +125,7 @@ async function checkSession() {
   try {
     const me = await api(`/me/${myId}`);
     const st = await api('/state');
+    registerPush();
     if (st.locked) {
       const myPair = st.pairs.find(p => p.womanId === myId || p.manId === myId);
       if (myPair) { screen = 'chat'; render(); startPolling(); return; }
@@ -93,6 +151,7 @@ async function resumeByID() {
     myId = val;
     localStorage.setItem('circleMemberId', myId);
     const st = await api('/state');
+    registerPush();
     if (st.locked) {
       const myPair = st.pairs.find(p => p.womanId === myId || p.manId === myId);
       if (myPair) { screen = 'chat'; render(); startPolling(); return; }
@@ -192,20 +251,40 @@ function render() {
         }
       }
 
+      const count = st.count || 0;
+      const capacity = st.capacity || 10;
+      const pct = Math.min(100, Math.round((count / capacity) * 100));
+
       app.innerHTML = `
         <div class="card" style="text-align:center;">
           <div class="eyebrow">Circle Lobby • Round ${st.round}</div>
           <h2 style="margin-top:4px;">Waiting for Synchronized Match</h2>
           <p style="color:var(--muted); font-size:14px;">Your responses are stored! Matches require a strict <strong>75% compatibility cutoff</strong>.</p>
-          
+
+          <div style="margin:18px 0;">
+            <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:6px;">
+              <span>Squad Capacity</span>
+              <span style="color:var(--gold); font-weight:700;">${count} / ${capacity} Joined</span>
+            </div>
+            <div style="width:100%; height:10px; background:var(--bg-2); border-radius:20px; overflow:hidden; border:1px solid var(--line);">
+              <div style="width:${pct}%; height:100%; background:linear-gradient(90deg, var(--gold), var(--gold-soft)); transition:width 0.6s ease;"></div>
+            </div>
+          </div>
+
+          <div id="fortuneBox" style="background:rgba(217,180,106,0.1); border-left:3px solid var(--gold); padding:10px 14px; border-radius:6px; font-style:italic; font-size:13px; color:var(--gold-soft); margin-bottom:18px; min-height:20px; transition:opacity 0.25s ease;">
+            ${FORTUNES[fortuneIndex % FORTUNES.length]}
+          </div>
+
           <div style="background:var(--bg-2); padding:12px; border-radius:8px; margin:20px 0;">
             <span style="font-size:11px; color:var(--muted); display:block;">YOUR MEMBER ID</span>
             <strong style="color:var(--gold); font-size:18px;">${myId}</strong>
+            <span style="font-size:11px; color:var(--muted); display:block; margin-top:4px;">Save this — use it to jump straight back into your chat later.</span>
           </div>
 
           <button onclick="triggerReveal()" style="width:100%; padding:14px; border-radius:8px; background:var(--gold); color:#120f26; font-weight:600; border:none; cursor:pointer;">Reveal Squad Matches Now →</button>
         </div>
       `;
+      startFortuneRotation();
     });
     return;
   }
@@ -216,6 +295,20 @@ function render() {
       const partnerName = myPair ? (myPair.womanId === myId ? myPair.manName : myPair.womanName) : 'Match';
       const score = myPair ? myPair.score : 75;
       const summary = myPair ? myPair.summary : '✨ Match created with strong harmony!';
+      const badges = myPair && myPair.badges ? myPair.badges : [];
+      const icebreaker = myPair ? myPair.icebreaker : null;
+
+      const badgeHtml = badges.length ? `
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:10px;">
+          ${badges.map(b => `<span style="background:rgba(255,255,255,0.08); border:1px solid var(--line); border-radius:20px; padding:3px 10px; font-size:11px;">${esc(b)}</span>`).join('')}
+        </div>
+      ` : '';
+
+      const icebreakerHtml = icebreaker ? `
+        <button onclick="useIcebreaker(this)" data-text="${esc(icebreaker)}" style="width:100%; text-align:left; margin-bottom:12px; padding:10px 14px; border-radius:10px; background:rgba(217,180,106,0.08); border:1px dashed var(--gold); color:var(--gold-soft); font-size:12px; cursor:pointer;">
+          💡 <strong>Icebreaker:</strong> ${esc(icebreaker)} <span style="color:var(--muted); float:right;">tap to use</span>
+        </button>
+      ` : '';
 
       app.innerHTML = `
         <div class="card">
@@ -224,8 +317,11 @@ function render() {
               <strong style="color:var(--gold); font-size:16px;">💖 Connected with ${esc(partnerName)}</strong>
               <span style="background:var(--gold); color:#120f26; font-weight:700; font-size:12px; padding:3px 10px; border-radius:20px;">${score}% Match</span>
             </div>
-            <p style="font-size:13px; color:#e2d9f3; margin:0; line-height:1.4; font-style:italic;">"${summary}"</p>
+            <p style="font-size:13px; color:#e2d9f3; margin:0; line-height:1.4; font-style:italic;">"${esc(summary)}"</p>
+            ${badgeHtml}
           </div>
+
+          ${icebreakerHtml}
 
           <div id="chatBox" style="height:320px; overflow-y:auto; background:var(--bg-2); border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:12px;"></div>
 
@@ -306,6 +402,13 @@ async function loadChat() {
   box.scrollTop = box.scrollHeight;
 }
 
+function useIcebreaker(btn) {
+  const input = document.getElementById('chatInput');
+  if (!input) return;
+  input.value = btn.getAttribute('data-text') || '';
+  input.focus();
+}
+
 async function sendChat() {
   const input = document.getElementById('chatInput');
   const text = input ? input.value.trim() : '';
@@ -331,6 +434,22 @@ function startPolling() {
     if (screen === 'lobby') render();
     if (screen === 'chat') loadChat();
   }, 2500);
+}
+
+function startFortuneRotation() {
+  if (fortuneTimer) clearInterval(fortuneTimer);
+  fortuneTimer = setInterval(() => {
+    if (screen !== 'lobby') { clearInterval(fortuneTimer); return; }
+    fortuneIndex++;
+    const box = document.getElementById('fortuneBox');
+    if (box) {
+      box.style.opacity = '0';
+      setTimeout(() => {
+        box.textContent = FORTUNES[fortuneIndex % FORTUNES.length];
+        box.style.opacity = '1';
+      }, 250);
+    }
+  }, 4000);
 }
 
 window.addEventListener('DOMContentLoaded', () => { checkSession(); });
